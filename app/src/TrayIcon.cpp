@@ -85,7 +85,11 @@ void TrayIcon::CreateMenu() {
     m_menu = CreatePopupMenu();
     AppendMenu(m_menu, MF_STRING, 1001, L"显示主窗口");
     AppendMenu(m_menu, MF_SEPARATOR, 0, nullptr);
-
+    std::wstring statusText = L"状态:" + m_status;
+    AppendMenu(m_menu, MF_INSERT, 0, statusText.c_str());
+    std::wstring pidText = L"状态:" + m_pid;
+    AppendMenu(m_menu, MF_INSERT, 0, pidText.c_str());
+    AppendMenu(m_menu, MF_SEPARATOR, 0, nullptr);
     // 添加Web地址菜单项（如果有设置）
     if (!m_web_url.empty() && m_web_url != L"") {
         std::wstring webText = L"打开Web页面: " + m_web_url;
@@ -166,6 +170,15 @@ LRESULT CALLBACK TrayIcon::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
     }
     return 0;
 }
+
+void TrayIcon::UpdateStatus(const std::wstring &status, const std::wstring &pid) {
+    m_status = status;
+    m_pid = pid;
+// 重新创建菜单以更新Status显示
+    DestroyMenu();
+    CreateMenu();
+}
+
 #else
 // macOS 特定实现
 void TrayIcon::ShowMacTrayIcon() {

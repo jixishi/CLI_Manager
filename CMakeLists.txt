@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.31)
+cmake_minimum_required(VERSION 3.26)
 project(CLI_Manager)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -12,7 +12,7 @@ set(IMGUI_BACKENDS "glfw_opengl")
 
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static")
 
-set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
+#set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
 
 add_definitions(-DUNICODE -D_UNICODE)
 
@@ -88,4 +88,3 @@ endif()
 set_target_properties(${PROJECT_NAME} PROPERTIES
         LINK_FLAGS "-static -static-libgcc -static-libstdc++ -Wl,-Bstatic -lpthread -Wl,-subsystem,windows"
 )
-

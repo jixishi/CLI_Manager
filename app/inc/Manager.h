@@ -8,25 +8,29 @@
 
 // 平台相关头文件
 #ifdef USE_WIN32_BACKEND
-    #include <d3d11.h>
-    #include <windows.h>
-    #include "imgui_impl_win32.h"
-    #include "imgui_impl_dx11.h"
+#include <d3d11.h>
+#include <windows.h>
+#include "imgui_impl_win32.h"
+#include "imgui_impl_dx11.h"
 #else
-    #ifdef _WIN32
-        #define GLFW_EXPOSE_NATIVE_WIN32
-        #include <GLFW/glfw3.h>
-        #include <GLFW/glfw3native.h>
-        #include <windows.h>
-    #elif __APPLE__
-        #define GLFW_EXPOSE_NATIVE_COCOA
-        #include <GLFW/glfw3.h>
-        #include <GLFW/glfw3native.h>
-    #else
-        #include <GLFW/glfw3.h>
-    #endif
-    #include "imgui_impl_glfw.h"
-    #include "imgui_impl_opengl3.h"
+#ifdef _WIN32
+#define GLFW_EXPOSE_NATIVE_WIN32
+
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+#include <windows.h>
+
+#elif __APPLE__
+#define GLFW_EXPOSE_NATIVE_COCOA
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+#else
+#include <GLFW/glfw3.h>
+#endif
+
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+
 #endif
 
 // 项目头文件
@@ -37,6 +41,7 @@ class Manager {
 public:
     // 构造函数和析构函数
     Manager();
+
     ~Manager();
 
     // 核心生命周期管理
@@ -59,11 +64,6 @@ private:
         Monitoring      // 监控布局
     };
 
-    // 结构体定义
-    struct ColoredTextSegment {
-        std::string text;   // 文本内容
-        ImVec4 color;      // 文本颜色
-    };
 
     // UI渲染相关方法
     void RenderUI();                              // 渲染主UI
@@ -86,13 +86,6 @@ private:
     void SaveCurrentLayout();                              // 保存当前布局
     void LoadSavedLayout();                                // 加载已保存布局
 
-    // 日志颜色处理方法
-    ImVec4 GetLogLevelColor(const std::string& log);       // 获取日志级别颜色
-    void RenderColoredLogLine(const std::string& log);     // 渲染彩色日志行
-    std::vector<ColoredTextSegment> ParseAnsiColorCodes(const std::string& text);  // 解析ANSI颜色代码
-    std::pair<ImVec4, bool> ParseAnsiColorCode(const std::string& code, const ImVec4& currentColor, bool currentBold);  // 解析单个ANSI颜色代码
-    ImVec4 GetAnsiColor(int colorIndex, bool bright);      // 获取ANSI颜色
-
     // 事件处理相关方法
     void HandleMessages();                                  // 处理消息
     bool ShouldExit() const;                               // 检查是否应该退出
@@ -114,15 +107,17 @@ private:
     void CleanupDirectX11();                               // 清理DirectX11
     static LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);  // 窗口过程
 #else
+
     bool InitializeGLFW();                                 // 初始化GLFW
     void CleanupGLFW();                                    // 清理GLFW
-    static void GlfwErrorCallback(int error, const char* description);  // GLFW错误回调
+    static void GlfwErrorCallback(int error, const char *description);  // GLFW错误回调
 #endif
 
     // 托盘相关方法
     bool InitializeTray();                                 // 初始化托盘
     void CleanupTray();                                    // 清理托盘
 #ifdef _WIN32
+
     static HWND CreateHiddenWindow();                      // 创建隐藏窗口
 #endif
 
@@ -135,8 +130,8 @@ private:
     IDXGISwapChain* m_pSwapChain = nullptr;               // 交换链
     ID3D11RenderTargetView* m_mainRenderTargetView = nullptr;  // 主渲染目标视图
 #else
-    GLFWwindow* m_window = nullptr;                        // GLFW窗口
-    const char* m_glsl_version = nullptr;                 // GLSL版本
+    GLFWwindow *m_window = nullptr;                        // GLFW窗口
+    const char *m_glsl_version = nullptr;                 // GLSL版本
 #endif
 
     // 托盘相关成员变量
@@ -148,12 +143,16 @@ private:
     // 控制标志
     bool m_should_exit = false;                           // 是否应该退出
     bool m_initialized = false;                           // 是否已初始化
-
+    bool m_fullscreen = false;
+    bool m_padding = false;
     // DPI缩放相关
     float m_dpi_scale = 1.0f;                            // 当前DPI缩放
     float m_last_dpi_scale = 1.0f;                       // 上次DPI缩放
 
     // 布局相关成员变量
+    ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
+    ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                    ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_MenuBar;
     bool m_apply_preset_layout = false;                   // 是否需要应用预设布局
     LayoutPreset m_pending_preset = LayoutPreset::Classic;  // 待应用的预设布局
     bool m_reset_layout = false;                          // 是否重置布局

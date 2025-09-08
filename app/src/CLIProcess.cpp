@@ -894,3 +894,8 @@ while (process_running_) {
 }
 #endif
 }
+
+std::wstring CLIProcess::GetPid() const {
+    if (pi_.hProcess == nullptr) return L"";
+    return StringToWide(std::to_string(pi_.dwProcessId));
+}

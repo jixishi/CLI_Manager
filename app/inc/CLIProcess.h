@@ -53,6 +53,8 @@ public:
     void Stop();
     void Restart(const std::string& command);
 
+    std::wstring GetPid() const;
+
     void ClearLogs();
     void AddLog(const std::string& log);
     const std::vector<std::string>& GetLogs() const;
