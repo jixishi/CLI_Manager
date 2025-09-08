@@ -10,12 +10,12 @@
 
 // 新增：输出编码枚举
 enum class OutputEncoding {
-    UTF8 = 0,
+    AUTO_DETECT =0,
+    UTF8,
     GBK,
     GB2312,
     BIG5,
     SHIFT_JIS,
-    AUTO_DETECT
 };
 
 class CLIProcess {
@@ -60,8 +60,8 @@ private:
     // 新增：编码转换相关方法
     std::string ConvertToUTF8(const std::string& input, OutputEncoding encoding);
     std::string DetectAndConvertToUTF8(const std::string& input);
-    UINT GetCodePageFromEncoding(OutputEncoding encoding);
-    bool IsValidUTF8(const std::string& str);
+    static UINT GetCodePageFromEncoding(OutputEncoding encoding);
+    static bool IsValidUTF8(const std::string& str);
 
     PROCESS_INFORMATION pi_{};
     HANDLE hReadPipe_{};

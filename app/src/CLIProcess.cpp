@@ -30,7 +30,7 @@ OutputEncoding CLIProcess::GetOutputEncoding() const {
 }
 
 // 新增：获取编码名称
-std::string CLIProcess::GetEncodingName(OutputEncoding encoding) {
+std::string CLIProcess::GetEncodingName(const OutputEncoding encoding) {
     switch (encoding) {
         case OutputEncoding::UTF8: return "UTF-8";
         case OutputEncoding::GBK: return "GBK";
@@ -55,9 +55,8 @@ std::vector<std::pair<OutputEncoding, std::string>> CLIProcess::GetSupportedEnco
 }
 
 // 新增：根据编码获取代码页
-UINT CLIProcess::GetCodePageFromEncoding(OutputEncoding encoding) {
+UINT CLIProcess::GetCodePageFromEncoding(const OutputEncoding encoding) {
     switch (encoding) {
-        case OutputEncoding::UTF8: return CP_UTF8;
         case OutputEncoding::GBK: return 936;
         case OutputEncoding::GB2312: return 20936;
         case OutputEncoding::BIG5: return 950;
@@ -68,7 +67,7 @@ UINT CLIProcess::GetCodePageFromEncoding(OutputEncoding encoding) {
 
 // 新增：检查是否为有效的UTF-8
 bool CLIProcess::IsValidUTF8(const std::string& str) {
-    const unsigned char* bytes = reinterpret_cast<const unsigned char*>(str.c_str());
+    const auto* bytes = reinterpret_cast<const unsigned char*>(str.c_str());
     size_t len = str.length();
 
     for (size_t i = 0; i < len; ) {

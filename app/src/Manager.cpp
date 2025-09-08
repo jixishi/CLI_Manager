@@ -318,13 +318,8 @@ void Manager::RenderEnvironmentVariablesSettings() {
         ImGui::Unindent();
     } else {
         ImGui::BeginDisabled(true);
-        ImGui::InputText("变量名", env_key_input_, IM_ARRAYSIZE(env_key_input_));
-        ImGui::SameLine();
-        ImGui::InputText("变量值", env_value_input_, IM_ARRAYSIZE(env_value_input_));
-        ImGui::SameLine();
-        ImGui::Button("添加");
-        ImGui::EndDisabled();
         ImGui::TextWrapped("说明：禁用时将使用系统默认环境变量启动程序。");
+        ImGui::EndDisabled();
     }
 }
 
