@@ -45,6 +45,10 @@ public:
     void SetEnvironmentVariables(const std::map<std::string, std::string>& env_vars);
     void SetOutputEncoding(OutputEncoding encoding);
 
+    // 新增：工作目录设置
+    void SetWorkingDirectory(const std::string& working_dir);
+    std::string GetWorkingDirectory() const;
+
     void Start(const std::string& command);
     void Stop();
     void Restart(const std::string& command);
@@ -68,6 +72,11 @@ public:
     OutputEncoding GetOutputEncoding() const;
     static std::string GetEncodingName(OutputEncoding encoding);
     static std::vector<std::pair<OutputEncoding, std::string>> GetSupportedEncodings();
+
+    // 新增：工作目录相关静态方法
+    static std::string ExtractDirectoryFromCommand(const std::string& command);
+    static std::string GetAbsolutePath(const std::string& path);
+    static bool DirectoryExists(const std::string& path);
 
 private:
     void ReadOutput();
@@ -117,6 +126,11 @@ private:
     // 编码相关
     mutable std::mutex encoding_mutex_;
     OutputEncoding output_encoding_;
+
+    // 新增：工作目录相关
+    mutable std::mutex working_dir_mutex_;
+    std::string working_directory_;
+    bool use_auto_working_dir_;
 };
 
 #endif // CLIPROCESS_H

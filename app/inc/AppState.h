@@ -28,6 +28,7 @@ public:
     char command_input[256]{};
     char send_command[256]{};
     bool auto_scroll_logs;
+    bool enable_colored_logs;
     int max_log_lines;
     char web_url[256]{};
 

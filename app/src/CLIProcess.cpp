@@ -1,6 +1,7 @@
 #include "CLIProcess.h"
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 
 #ifdef _WIN32
 #include "Units.h"
@@ -20,17 +21,122 @@ CLIProcess::CLIProcess() {
     process_pid_ = -1;
     pipe_stdout_[0] = pipe_stdout_[1] = -1;
     pipe_stdin_[0] = pipe_stdin_[1] = -1;
-    process__running_ = false;
+    process_running_ = false;
 #endif
     max_log_lines_ = 1000;
     stop_timeout_ms_ = 5000;
     output_encoding_ = OutputEncoding::AUTO_DETECT;
+    use_auto_working_dir_ = true; // 新增：默认启用自动工作目录
 }
 
 CLIProcess::~CLIProcess() {
     Stop();
     CleanupResources();
 }
+
+// 新增：设置工作目录
+void CLIProcess::SetWorkingDirectory(const std::string& working_dir) {
+    std::lock_guard<std::mutex> lock(working_dir_mutex_);
+    if (working_dir.empty()) {
+        use_auto_working_dir_ = true;
+        working_directory_.clear();
+    } else {
+        if (DirectoryExists(working_dir)) {
+            working_directory_ = GetAbsolutePath(working_dir);
+            use_auto_working_dir_ = false;
+            AddLog("工作目录已设置为: " + working_directory_);
+        } else {
+            AddLog("警告: 指定的工作目录不存在: " + working_dir);
+        }
+    }
+}
+
+// 新增：获取当前工作目录设置
+std::string CLIProcess::GetWorkingDirectory() const {
+    std::lock_guard<std::mutex> lock(working_dir_mutex_);
+    return working_directory_;
+}
+
+// 新增：从命令中提取目录路径
+std::string CLIProcess::ExtractDirectoryFromCommand(const std::string& command) {
+    if (command.empty()) return "";
+
+    std::string trimmed_command = command;
+
+    // 移除前后空格
+    size_t start = trimmed_command.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+
+    size_t end = trimmed_command.find_last_not_of(" \t\r\n");
+    trimmed_command = trimmed_command.substr(start, end - start + 1);
+
+    std::string executable_path;
+
+    // 处理引号包围的路径
+    if (trimmed_command[0] == '"') {
+        size_t quote_end = trimmed_command.find('"', 1);
+        if (quote_end != std::string::npos) {
+            executable_path = trimmed_command.substr(1, quote_end - 1);
+        }
+    } else {
+        // 找到第一个空格前的部分作为可执行文件路径
+        size_t space_pos = trimmed_command.find(' ');
+        if (space_pos != std::string::npos) {
+            executable_path = trimmed_command.substr(0, space_pos);
+        } else {
+            executable_path = trimmed_command;
+        }
+    }
+
+    if (executable_path.empty()) return "";
+
+    // 使用 std::filesystem 来处理路径
+    try {
+        std::filesystem::path path(executable_path);
+
+        // 如果是相对路径，转换为绝对路径
+        if (path.is_relative()) {
+            path = std::filesystem::absolute(path);
+        }
+
+        // 检查文件是否存在
+        if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) {
+            return path.parent_path().string();
+        }
+
+        // 如果文件不存在，但路径看起来像一个文件路径，返回其父目录
+        if (path.has_parent_path()) {
+            auto parent = path.parent_path();
+            if (std::filesystem::exists(parent) && std::filesystem::is_directory(parent)) {
+                return parent.string();
+            }
+        }
+    } catch (const std::exception& e) {
+        // 路径解析失败，返回当前工作目录
+        return std::filesystem::current_path().string();
+    }
+
+    return "";
+}
+
+// 新增：获取绝对路径
+std::string CLIProcess::GetAbsolutePath(const std::string& path) {
+    try {
+        return std::filesystem::absolute(path).string();
+    } catch (const std::exception&) {
+        return path;
+    }
+}
+
+// 新增：检查目录是否存在
+bool CLIProcess::DirectoryExists(const std::string& path) {
+    try {
+        return std::filesystem::exists(path) && std::filesystem::is_directory(path);
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 // 设置输出编码
 void CLIProcess::SetOutputEncoding(OutputEncoding encoding) {
     std::lock_guard<std::mutex> lock(encoding_mutex_);
@@ -228,7 +334,7 @@ void CLIProcess::SetEnvironmentVariables(const std::map<std::string, std::string
     if (!environment_variables_.empty()) {
         // AddLog("已设置 " + std::to_string(environment_variables_.size()) + " 个有效环境变量");
         for (const auto& pair : environment_variables_) {
-            AddLog("  " + pair.first + "=" + pair.second);
+            // AddLog("  " + pair.first + "=" + pair.second);
         }
     } else {
         // AddLog("已清空所有自定义环境变量");
@@ -275,6 +381,25 @@ void CLIProcess::ClearEnvironmentVariables() {
 
 void CLIProcess::Start(const std::string& command) {
     Stop();
+
+    // 确定工作目录
+    std::string working_dir;
+    {
+        std::lock_guard<std::mutex> lock(working_dir_mutex_);
+        if (use_auto_working_dir_) {
+            working_dir = ExtractDirectoryFromCommand(command);
+            if (working_dir.empty()) {
+                working_dir = std::filesystem::current_path().string();
+            }
+            // AddLog("自动检测工作目录: " + working_dir);
+        } else {
+            working_dir = working_directory_;
+            if (!working_dir.empty()) {
+                // AddLog("使用指定工作目录: " + working_dir);
+            }
+        }
+    }
+
 #ifdef _WIN32
     SECURITY_ATTRIBUTES saAttr;
     saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -329,24 +454,122 @@ void CLIProcess::Start(const std::string& command) {
         env_block += '\0';
     }
 
-    BOOL bSuccess = CreateProcessA(
-        nullptr,
-        const_cast<char*>(command.c_str()),
-        nullptr,
-        nullptr,
-        TRUE,
-        CREATE_NO_WINDOW,
-        env_block.empty() ? nullptr : (LPVOID)env_block.data(),
-        nullptr,
-        &siStartInfo,
-        &piProcInfo);
+    // 处理工作目录 - 支持Unicode路径
+    const char* working_dir_ptr = nullptr;
+    std::wstring working_dir_wide;
+
+    if (!working_dir.empty()) {
+        // 验证工作目录是否存在
+        if (!DirectoryExists(working_dir)) {
+            // AddLog("警告: 工作目录不存在，使用当前目录: " + working_dir);
+            working_dir = std::filesystem::current_path().string();
+        }
+
+        // 转换为绝对路径
+        working_dir = GetAbsolutePath(working_dir);
+        working_dir_ptr = working_dir.c_str();
+
+        // 如果路径包含非ASCII字符，需要使用CreateProcessW
+        bool hasNonAscii = false;
+        for (char c : working_dir) {
+            if (static_cast<unsigned char>(c) > 127) {
+                hasNonAscii = true;
+                break;
+            }
+        }
+
+        if (hasNonAscii) {
+            // 转换为宽字符用于CreateProcessW
+            int wideSize = MultiByteToWideChar(CP_UTF8, 0, working_dir.c_str(), -1, nullptr, 0);
+            if (wideSize > 0) {
+                working_dir_wide.resize(wideSize);
+                MultiByteToWideChar(CP_UTF8, 0, working_dir.c_str(), -1, &working_dir_wide[0], wideSize);
+            }
+        }
+    }
+
+    BOOL bSuccess = FALSE;
+
+    // 如果工作目录包含Unicode字符，使用CreateProcessW
+    if (!working_dir_wide.empty()) {
+        // 转换命令为宽字符
+        int cmdWideSize = MultiByteToWideChar(CP_UTF8, 0, command.c_str(), -1, nullptr, 0);
+        if (cmdWideSize > 0) {
+            std::wstring command_wide(cmdWideSize, L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, command.c_str(), -1, &command_wide[0], cmdWideSize);
+
+            // 转换环境变量为宽字符
+            std::wstring env_block_wide;
+            if (!env_block.empty()) {
+                int envWideSize = MultiByteToWideChar(CP_UTF8, 0, env_block.c_str(), static_cast<int>(env_block.size()), nullptr, 0);
+                if (envWideSize > 0) {
+                    env_block_wide.resize(envWideSize);
+                    MultiByteToWideChar(CP_UTF8, 0, env_block.c_str(), static_cast<int>(env_block.size()), &env_block_wide[0], envWideSize);
+                }
+            }
+
+            STARTUPINFOW siStartInfoW;
+            ZeroMemory(&siStartInfoW, sizeof(STARTUPINFOW));
+            siStartInfoW.cb = sizeof(STARTUPINFOW);
+            siStartInfoW.hStdError = hWriteTmp;
+            siStartInfoW.hStdOutput = hWriteTmp;
+            siStartInfoW.hStdInput = hReadTmp_stdin;
+            siStartInfoW.dwFlags |= STARTF_USESTDHANDLES;
+
+            bSuccess = CreateProcessW(
+                nullptr,
+                &command_wide[0],
+                nullptr,
+                nullptr,
+                TRUE,
+                CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+                env_block_wide.empty() ? nullptr : (LPVOID)env_block_wide.data(),
+                working_dir_wide.c_str(),
+                &siStartInfoW,
+                &piProcInfo);
+        }
+    } else {
+        // 使用ANSI版本
+        bSuccess = CreateProcessA(
+            nullptr,
+            const_cast<char*>(command.c_str()),
+            nullptr,
+            nullptr,
+            TRUE,
+            CREATE_NO_WINDOW,
+            env_block.empty() ? nullptr : static_cast<LPVOID>(env_block.data()),
+            working_dir_ptr,
+            &siStartInfo,
+            &piProcInfo);
+    }
 
     CloseHandle(hWriteTmp);
     CloseHandle(hReadTmp_stdin);
 
     if (!bSuccess) {
+        DWORD error = GetLastError();
         CloseHandle(hReadTmp);
         CloseHandle(hWriteTmp_stdin);
+        AddLog("启动进程失败，错误代码: " + std::to_string(error));
+
+        // 提供更详细的错误信息
+        switch (error) {
+            case ERROR_FILE_NOT_FOUND:
+                AddLog("错误: 找不到指定的文件或程序");
+                break;
+            case ERROR_PATH_NOT_FOUND:
+                AddLog("错误: 找不到指定的路径");
+                break;
+            case ERROR_ACCESS_DENIED:
+                AddLog("错误: 访问被拒绝，可能需要管理员权限");
+                break;
+            case ERROR_INVALID_PARAMETER:
+                AddLog("错误: 无效的参数");
+                break;
+            default:
+                AddLog("错误: 未知错误，请检查命令和路径是否正确");
+                break;
+        }
         return;
     }
 
@@ -356,15 +579,21 @@ void CLIProcess::Start(const std::string& command) {
     hReadPipe_ = hReadTmp;
     hWritePipe_stdin_ = hWriteTmp_stdin;
 
+    AddLog("进程已启动，PID: " + std::to_string(piProcInfo.dwProcessId));
+    if (!working_dir.empty()) {
+        AddLog("工作目录: " + working_dir);
+    }
+
     // Start output reading thread
     output_thread_ = std::thread(&CLIProcess::ReadOutput, this);
 
 #else
-    // Unix/Linux implementation using posix_spawn
+    // Unix/Linux implementation
     int pipe_out[2];
     int pipe_in[2];
 
     if (pipe(pipe_out) < 0 || pipe(pipe_in) < 0) {
+        AddLog("创建管道失败: " + std::string(strerror(errno)));
         return;
     }
 
@@ -380,10 +609,26 @@ void CLIProcess::Start(const std::string& command) {
         dup2(pipe_in[0], STDIN_FILENO);
         close(pipe_in[0]);
 
+        // 设置工作目录
+        if (!working_dir.empty()) {
+            if (!DirectoryExists(working_dir)) {
+                fprintf(stderr, "警告: 工作目录不存在: %s\n", working_dir.c_str());
+                working_dir = std::filesystem::current_path().string();
+            }
+
+            if (chdir(working_dir.c_str()) != 0) {
+                fprintf(stderr, "无法切换到工作目录: %s, 错误: %s\n",
+                       working_dir.c_str(), strerror(errno));
+            }
+        }
+
         // Prepare environment variables
-        if (!environment_variables_.empty()) {
-            for (const auto& kv : environment_variables_) {
-                setenv(kv.first.c_str(), kv.second.c_str(), 1);
+        {
+            std::lock_guard<std::mutex> lock(env_mutex_);
+            if (!environment_variables_.empty()) {
+                for (const auto& kv : environment_variables_) {
+                    setenv(kv.first.c_str(), kv.second.c_str(), 1);
+                }
             }
         }
 
@@ -403,8 +648,19 @@ void CLIProcess::Start(const std::string& command) {
 
         process_running_ = true;
 
+        AddLog("进程已启动，PID: " + std::to_string(pid));
+        if (!working_dir.empty()) {
+            AddLog("工作目录: " + working_dir);
+        }
+
         // Start output reading thread
         output_thread_ = std::thread(&CLIProcess::ReadOutput, this);
+    } else {
+        AddLog("fork失败，无法启动进程: " + std::string(strerror(errno)));
+        close(pipe_out[0]);
+        close(pipe_out[1]);
+        close(pipe_in[0]);
+        close(pipe_in[1]);
     }
 #endif
 }

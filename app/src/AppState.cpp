@@ -191,6 +191,9 @@ void AppState::LoadSettings() {
                 else if (key == "AutoScrollLogs") {
                     auto_scroll_logs = (value == "1");
                 }
+                else if (key == "EnableColoredLogs") {
+                    enable_colored_logs = (value == "1");
+                }
                 else if (key == "AutoStart") {
                     auto_start = (value == "1");
                 }
@@ -238,6 +241,7 @@ void AppState::SaveSettings() {
     file << "CommandInput=" << command_input << "\n";
     file << "MaxLogLines=" << max_log_lines << "\n";
     file << "AutoScrollLogs=" << (auto_scroll_logs ? "1" : "0") << "\n";
+    file << "EnableColoredLogs=" << (enable_colored_logs ? "1" : "0") << "\n";
     file << "AutoStart=" << (auto_start ? "1" : "0") << "\n";
     file << "WebUrl=" << web_url << "\n";
 
