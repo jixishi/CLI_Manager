@@ -1,6 +1,7 @@
 #include "TrayIcon.h"
 #include "Units.h"
 
+#ifdef _WIN32
 TrayIcon::TrayIcon(HWND hwnd, HICON icon)
     : m_hwnd(hwnd), m_icon(icon), m_visible(false), m_menu(nullptr) {
 
@@ -16,6 +17,13 @@ TrayIcon::TrayIcon(HWND hwnd, HICON icon)
 
     CreateMenu();
 }
+#else
+TrayIcon::TrayIcon(void* app_delegate, void* icon)
+    : m_app_delegate(app_delegate), m_icon(icon), m_visible(false) {
+    m_web_url = "http://localhost:8080"; // 默认URL
+    CreateMenu();
+}
+#endif
 
 TrayIcon::~TrayIcon() {
     Hide();
@@ -24,24 +32,41 @@ TrayIcon::~TrayIcon() {
 
 void TrayIcon::Show() {
     if (!m_visible) {
+#ifdef _WIN32
         Shell_NotifyIcon(NIM_ADD, &m_nid);
+#else
+        ShowMacTrayIcon();
+#endif
         m_visible = true;
     }
 }
 
 void TrayIcon::Hide() {
     if (m_visible) {
+#ifdef _WIN32
         Shell_NotifyIcon(NIM_DELETE, &m_nid);
+#else
+        HideMacTrayIcon();
+#endif
         m_visible = false;
     }
 }
 
+#ifdef _WIN32
 void TrayIcon::UpdateWebUrl(const std::wstring& url) {
     m_web_url = url;
     // 重新创建菜单以更新Web URL显示
     DestroyMenu();
     CreateMenu();
 }
+#else
+void TrayIcon::UpdateWebUrl(const std::string& url) {
+    m_web_url = url;
+    // 重新创建菜单以更新Web URL显示
+    DestroyMenu();
+    CreateMenu();
+}
+#endif
 
 void TrayIcon::SetShowWindowCallback(const ShowWindowCallback &callback) {
     m_show_window_callback = callback;
@@ -52,13 +77,14 @@ void TrayIcon::SetExitCallback(const ExitCallback &callback) {
 }
 
 void TrayIcon::CreateMenu() {
+#ifdef _WIN32
     if (m_menu) {
         DestroyMenu();
     }
 
     m_menu = CreatePopupMenu();
     AppendMenu(m_menu, MF_STRING, 1001, L"显示主窗口");
-    AppendMenu(m_menu, MF_SEPARATOR, 0, NULL);
+    AppendMenu(m_menu, MF_SEPARATOR, 0, nullptr);
 
     // 添加Web地址菜单项（如果有设置）
     if (!m_web_url.empty() && m_web_url != L"") {
@@ -68,15 +94,23 @@ void TrayIcon::CreateMenu() {
     }
 
     AppendMenu(m_menu, MF_STRING, 1003, L"退出");
+#else
+    CreateMacMenu();
+#endif
 }
 
 void TrayIcon::DestroyMenu() {
+#ifdef _WIN32
     if (m_menu) {
         ::DestroyMenu(m_menu);
         m_menu = nullptr;
     }
+#else
+    DestroyMacMenu();
+#endif
 }
 
+#ifdef _WIN32
 void TrayIcon::ShowContextMenu() const {
     if (!m_menu) return;
 
@@ -132,3 +166,61 @@ LRESULT CALLBACK TrayIcon::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
     }
     return 0;
 }
+#else
+// macOS 特定实现
+void TrayIcon::ShowMacTrayIcon() {
+    // 通过 Objective-C 接口显示托盘图标
+    ShowMacTrayIconImpl(m_app_delegate, m_icon);
+}
+
+void TrayIcon::HideMacTrayIcon() {
+    // 通过 Objective-C 接口隐藏托盘图标
+    HideMacTrayIconImpl(m_app_delegate);
+}
+
+void TrayIcon::CreateMacMenu() {
+    // 通过 Objective-C 接口创建菜单
+    CreateMacMenuImpl(m_app_delegate, m_web_url.c_str());
+}
+
+void TrayIcon::DestroyMacMenu() {
+    // 通过 Objective-C 接口销毁菜单
+    DestroyMacMenuImpl(m_app_delegate);
+}
+
+void TrayIcon::OnMacMenuAction(int action) {
+    switch (action) {
+    case 1001: // 显示主窗口
+        if (m_show_window_callback) {
+            m_show_window_callback();
+        }
+        break;
+    case 1002: // 打开Web页面
+        if (!m_web_url.empty()) {
+            OpenWebPageMac(m_web_url.c_str());
+        }
+        break;
+    case 1003: // 退出
+        if (m_exit_callback) {
+            m_exit_callback();
+        }
+        break;
+    }
+}
+
+// C 接口函数，供 Objective-C 调用
+extern "C" void TrayIconMenuCallback(void* tray_instance, int action) {
+    if (tray_instance) {
+        static_cast<TrayIcon*>(tray_instance)->OnMacMenuAction(action);
+    }
+}
+
+// 外部声明的 Objective-C 接口函数
+extern "C" {
+    void ShowMacTrayIconImpl(void* app_delegate, void* icon);
+    void HideMacTrayIconImpl(void* app_delegate);
+    void CreateMacMenuImpl(void* app_delegate, const char* web_url);
+    void DestroyMacMenuImpl(void* app_delegate);
+    void OpenWebPageMac(const char* url);
+}
+#endif

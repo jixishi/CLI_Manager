@@ -11,12 +11,97 @@ AppState::AppState() :
     stop_timeout_ms(5000),
     use_stop_command(false),
     use_custom_environment(false),
-    output_encoding(OutputEncoding::AUTO_DETECT), // 新增：默认自动检测编码
+    output_encoding(OutputEncoding::AUTO_DETECT),
+    max_command_history(20), // 新增：最大历史记录数量
     settings_dirty(false) {
     strcpy_s(command_input, "cmd.exe");
     strcpy_s(web_url, "http://localhost:8080");
     strcpy_s(stop_command, "exit");
     memset(send_command, 0, sizeof(send_command));
+}
+
+// 新增：添加命令到历史记录
+void AppState::AddCommandToHistory(const std::string& command) {
+    if (command.empty()) return;
+
+    // 移除重复的命令
+    auto it = std::find(command_history.begin(), command_history.end(), command);
+    if (it != command_history.end()) {
+        command_history.erase(it);
+    }
+
+    // 添加到开头
+    command_history.insert(command_history.begin(), command);
+
+    // 限制历史记录数量
+    if (command_history.size() > static_cast<size_t>(max_command_history)) {
+        command_history.resize(max_command_history);
+    }
+
+    settings_dirty = true;
+}
+
+// 新增：从历史记录中移除命令
+void AppState::RemoveCommandFromHistory(int index) {
+    if (index >= 0 && index < static_cast<int>(command_history.size())) {
+        command_history.erase(command_history.begin() + index);
+        settings_dirty = true;
+    }
+}
+
+// 新增：清空命令历史记录
+void AppState::ClearCommandHistory() {
+    command_history.clear();
+    settings_dirty = true;
+}
+
+// 新增：序列化命令历史记录
+std::string AppState::SerializeCommandHistory() const {
+    std::ostringstream oss;
+    bool first = true;
+    for (const auto& command : command_history) {
+        if (!first) {
+            oss << "|";
+        }
+        // 转义分隔符
+        std::string escaped_command = command;
+        size_t pos = 0;
+        while ((pos = escaped_command.find("|", pos)) != std::string::npos) {
+            escaped_command.replace(pos, 1, "\\|");
+            pos += 2;
+        }
+        oss << escaped_command;
+        first = false;
+    }
+    return oss.str();
+}
+
+// 新增：反序列化命令历史记录
+void AppState::DeserializeCommandHistory(const std::string& serialized) {
+    command_history.clear();
+    if (serialized.empty()) return;
+
+    std::istringstream iss(serialized);
+    std::string command;
+    std::string current;
+
+    for (size_t i = 0; i < serialized.length(); ++i) {
+        if (serialized[i] == '\\' && i + 1 < serialized.length() && serialized[i + 1] == '|') {
+            current += '|';
+            ++i; // 跳过下一个字符
+        } else if (serialized[i] == '|') {
+            if (!current.empty()) {
+                command_history.push_back(current);
+                current.clear();
+            }
+        } else {
+            current += serialized[i];
+        }
+    }
+
+    if (!current.empty()) {
+        command_history.push_back(current);
+    }
 }
 
 std::string AppState::SerializeEnvironmentVariables() const {
@@ -128,9 +213,16 @@ void AppState::LoadSettings() {
                 else if (key == "EnvironmentVariables") {
                     DeserializeEnvironmentVariables(value);
                 }
-                // 新增：输出编码配置的加载
                 else if (key == "OutputEncoding") {
                     DeserializeOutputEncoding(value);
+                }
+                // 新增：命令历史记录配置的加载
+                else if (key == "CommandHistory") {
+                    DeserializeCommandHistory(value);
+                }
+                else if (key == "MaxCommandHistory") {
+                    max_command_history = std::stoi(value);
+                    max_command_history = std::max(5, std::min(max_command_history, 100));
                 }
             }
         }
@@ -158,8 +250,12 @@ void AppState::SaveSettings() {
     file << "UseCustomEnvironment=" << (use_custom_environment ? "1" : "0") << "\n";
     file << "EnvironmentVariables=" << SerializeEnvironmentVariables() << "\n";
 
-    // 新增：输出编码配置的保存
+    // 输出编码配置的保存
     file << "OutputEncoding=" << SerializeOutputEncoding() << "\n";
+
+    // 新增：命令历史记录配置的保存
+    file << "CommandHistory=" << SerializeCommandHistory() << "\n";
+    file << "MaxCommandHistory=" << max_command_history << "\n";
 
     file.close();
 

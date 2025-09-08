@@ -85,7 +85,7 @@ if(IMGUI_BACKENDS STREQUAL "win32_dx11")
 endif()
 
 # 设置链接选项
-#set_target_properties(${PROJECT_NAME} PROPERTIES
-#        LINK_FLAGS "-static -Wl,-subsystem,windows"
-#)
-#
+set_target_properties(${PROJECT_NAME} PROPERTIES
+        LINK_FLAGS "-static -static-libgcc -static-libstdc++ -Wl,-Bstatic -lpthread -Wl,-subsystem,windows"
+)
+

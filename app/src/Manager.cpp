@@ -2,8 +2,8 @@
 #include <cstdio>
 #include <algorithm>
 
-#include "Units.h"
 
+#include "Units.h"
 
 Manager::Manager() = default;
 
@@ -45,25 +45,56 @@ bool Manager::Initialize() {
     style.IndentSpacing = 25.0f;
     style.ScrollbarSize = 15.0f;
     style.GrabMinSize = 10.0f;
+
 #ifdef USE_WIN32_BACKEND
     ImGui_ImplWin32_Init(m_hwnd);
     ImGui_ImplDX11_Init(m_pd3dDevice, m_pd3dDeviceContext);
-    // ImGui_ImplWin32_EnableDpiAwareness();
-    // m_dpi_scale=ImGui_ImplWin32_GetDpiScaleForHwnd(m_hwnd);
-    // style.ScaleAllSizes(m_dpi_scale);
+    m_dpi_scale = ImGui_ImplWin32_GetDpiScaleForHwnd(m_hwnd);
+    style.ScaleAllSizes(m_dpi_scale);
 #else
     ImGui_ImplGlfw_InitForOpenGL(m_window, true);
     ImGui_ImplOpenGL3_Init(m_glsl_version);
 #endif
 
-    // 加载中文字体
+    // 加载字体
+#ifdef _WIN32
     ImFont* font = io.Fonts->AddFontFromFileTTF(
         "C:/Windows/Fonts/msyh.ttc",
-        18.0f,
+        14.0f,
         nullptr,
         io.Fonts->GetGlyphRangesChineseFull()
     );
-    IM_ASSERT(font != nullptr);
+#elif __APPLE__
+    // macOS 中文字体路径
+    ImFont* font = io.Fonts->AddFontFromFileTTF(
+        "/System/Library/Fonts/PingFang.ttc",
+        14.0f,
+        nullptr,
+        io.Fonts->GetGlyphRangesChineseFull()
+    );
+    // 备用字体
+    if (!font) {
+        font = io.Fonts->AddFontFromFileTTF(
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            14.0f,
+            nullptr,
+            io.Fonts->GetGlyphRangesChineseFull()
+        );
+    }
+#else
+    // Linux 字体路径
+    ImFont* font = io.Fonts->AddFontFromFileTTF(
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        14.0f,
+        nullptr,
+        io.Fonts->GetGlyphRangesChineseFull()
+    );
+#endif
+
+    if (!font) {
+        // 如果没有找到中文字体，使用默认字体
+        font = io.Fonts->AddFontDefault();
+    }
 
     // 初始化托盘
     if (!InitializeTray()) return false;
@@ -72,7 +103,12 @@ bool Manager::Initialize() {
     m_app_state.LoadSettings();
     m_app_state.auto_start = IsAutoStartEnabled();
     m_app_state.ApplySettings();
+
+#ifdef _WIN32
     m_tray->UpdateWebUrl(StringToWide(m_app_state.web_url));
+#else
+    m_tray->UpdateWebUrl(m_app_state.web_url);
+#endif
 
     // 如果开启了开机自启动且有启动命令，则自动启动子进程
     if (m_app_state.auto_start && strlen(m_app_state.command_input) > 0) {
@@ -196,17 +232,34 @@ void Manager::RenderSettingsMenu() {
         m_app_state.settings_dirty = true;
     }
 
+    // 新增：命令历史记录设置
+    ImGui::Separator();
+    ImGui::Text("命令历史记录设置");
+    if (ImGui::InputInt("最大历史记录数", &m_app_state.max_command_history, 5, 10)) {
+        m_app_state.max_command_history = std::max(5, std::min(m_app_state.max_command_history, 100));
+        m_app_state.settings_dirty = true;
+    }
+
+    if (ImGui::Button("清空命令历史记录")) {
+        m_app_state.ClearCommandHistory();
+    }
+
     ImGui::Separator();
     ImGui::Text("Web设置");
     if (ImGui::InputText("Web地址", m_app_state.web_url, IM_ARRAYSIZE(m_app_state.web_url))) {
+#ifdef _WIN32
         m_tray->UpdateWebUrl(StringToWide(m_app_state.web_url));
+#else
+        m_tray->UpdateWebUrl(m_app_state.web_url);
+#endif
         m_app_state.settings_dirty = true;
     }
 
     RenderStopCommandSettings();
     RenderEnvironmentVariablesSettings();
-    RenderOutputEncodingSettings(); // 新增：渲染编码设置
+    RenderOutputEncodingSettings();
 }
+
 
 
 void Manager::RenderStopCommandSettings() {
@@ -233,10 +286,8 @@ void Manager::RenderStopCommandSettings() {
         ImGui::TextWrapped("说明：启用后，停止程序时会先发送指定命令，等待程序优雅退出。超时后将强制终止。");
     } else {
         ImGui::BeginDisabled(true);
-        ImGui::InputText("停止命令", m_app_state.stop_command, IM_ARRAYSIZE(m_app_state.stop_command));
-        ImGui::InputInt("超时时间(毫秒)", &m_app_state.stop_timeout_ms);
-        ImGui::EndDisabled();
         ImGui::TextWrapped("说明：禁用时将直接强制终止程序。");
+        ImGui::EndDisabled();
     }
 }
 
@@ -360,29 +411,97 @@ void Manager::RenderOutputEncodingSettings() {
     ImGui::BulletText("GBK/GB2312：适用于中文Windows系统的程序");
     ImGui::BulletText("Big5：适用于繁体中文程序");
     ImGui::BulletText("Shift-JIS：适用于日文程序");
-
-    // // 测试按钮
-    // if (ImGui::Button("测试编码转换")) {
-    //     std::string testText = "测试中编码转换显示：中文，English, 日本語, 한국어";
-    //     m_app_state.cli_process.TestOutputEncoding(testText);
-    // }
 }
 
 void Manager::RenderMainContent() {
     float buttonWidth = 80.0f * m_dpi_scale;
     float buttonHeight = 40.0f * m_dpi_scale;
-    float inputWidth = ImGui::GetContentRegionAvail().x * 0.6f;
-    
-    // 启动命令输入
+    float inputWidth = ImGui::GetContentRegionAvail().x * 0.5f; // 调整输入框宽度为50%
+
+    // 启动命令输入区域
+    ImGui::BeginGroup();
+    ImGui::Text("启动命令");
+
+    // 命令输入框和历史记录按钮
     ImGui::SetNextItemWidth(inputWidth);
-    if (ImGui::InputText("启动命令", m_app_state.command_input, IM_ARRAYSIZE(m_app_state.command_input))) {
+    if (ImGui::InputText("##启动命令", m_app_state.command_input, IM_ARRAYSIZE(m_app_state.command_input))) {
         m_app_state.settings_dirty = true;
     }
 
-    // 控制按钮
+    ImGui::SameLine();
+    if (ImGui::Button("历史记录", ImVec2(100.0f * m_dpi_scale, 0))) {
+        show_command_history_ = !show_command_history_;
+    }
+
+    // 显示命令历史记录下拉列表
+    if (show_command_history_) {
+        const auto& history = m_app_state.GetCommandHistory();
+
+        if (!history.empty()) {
+            ImGui::Indent();
+            ImGui::Text("选择历史命令 (%d个):", static_cast<int>(history.size()));
+
+            if (ImGui::BeginChild("CommandHistory", ImVec2(0, 120), true)) {
+                for (int i = 0; i < static_cast<int>(history.size()); ++i) {
+                    ImGui::PushID(i);
+
+                    // 选择按钮
+                    if (ImGui::Button("选择", ImVec2(50.0f * m_dpi_scale, 0))) {
+                        strncpy_s(m_app_state.command_input, history[i].c_str(), sizeof(m_app_state.command_input) - 1);
+                        show_command_history_ = false;
+                        ImGui::PopID();
+                        break;
+                    }
+                    ImGui::SameLine();
+
+                    // 显示命令内容（限制显示长度）
+                    std::string displayCommand = history[i];
+                    if (displayCommand.length() > 60) {
+                        displayCommand = displayCommand.substr(0, 57) + "...";
+                    }
+                    ImGui::TextUnformatted(displayCommand.c_str());
+
+                    // 鼠标悬停时显示完整命令
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("%s", history[i].c_str());
+                    }
+
+                    ImGui::SameLine();
+
+                    // 删除按钮
+                    if (ImGui::SmallButton("删除")) {
+                        m_app_state.RemoveCommandFromHistory(i);
+                        ImGui::PopID();
+                        continue;
+                    }
+
+                    ImGui::PopID();
+                }
+            }
+            ImGui::EndChild();
+
+            // 操作按钮
+            if (ImGui::Button("清空所有历史记录")) {
+                m_app_state.ClearCommandHistory();
+            }
+            ImGui::SameLine();
+
+            ImGui::Unindent();
+        } else {
+            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "暂无启动命令历史");
+        }
+    }
+    ImGui::EndGroup();
+
+    ImGui::Spacing();
+
+
     ImGui::BeginGroup();
     if (ImGui::Button("启动", ImVec2(buttonWidth, buttonHeight))) {
-        m_app_state.cli_process.Start(m_app_state.command_input);
+        if (strlen(m_app_state.command_input) > 0) {
+            m_app_state.cli_process.Start(m_app_state.command_input);
+            m_app_state.AddCommandToHistory(m_app_state.command_input);
+        }
     }
     ImGui::SameLine();
     if (ImGui::Button("停止", ImVec2(buttonWidth, buttonHeight))) {
@@ -390,7 +509,10 @@ void Manager::RenderMainContent() {
     }
     ImGui::SameLine();
     if (ImGui::Button("重启", ImVec2(buttonWidth, buttonHeight))) {
-        m_app_state.cli_process.Restart(m_app_state.command_input);
+        if (strlen(m_app_state.command_input) > 0) {
+            m_app_state.cli_process.Restart(m_app_state.command_input);
+            m_app_state.AddCommandToHistory(m_app_state.command_input);
+        }
     }
     ImGui::SameLine();
     if (ImGui::Button("清理日志", ImVec2(100.0f * m_dpi_scale, buttonHeight))) {
@@ -528,6 +650,7 @@ LRESULT WINAPI Manager::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 #endif
 
 bool Manager::InitializeTray() {
+#ifdef _WIN32
     m_tray_hwnd = CreateHiddenWindow();
     if (!m_tray_hwnd) {
         return false;
@@ -535,6 +658,16 @@ bool Manager::InitializeTray() {
 
     HICON trayIcon = LoadIcon(NULL, IDI_APPLICATION);
     m_tray = std::make_unique<TrayIcon>(m_tray_hwnd, trayIcon);
+
+    // 设置托盘窗口的用户数据，指向TrayIcon实例
+    SetWindowLongPtr(m_tray_hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(m_tray.get()));
+#else
+    // macOS 托盘初始化
+    void* app_delegate = GetMacAppDelegate(); // 需要实现这个函数
+    void* tray_icon = GetMacTrayIcon(); // 需要实现这个函数
+
+    m_tray = std::make_unique<TrayIcon>(app_delegate, tray_icon);
+#endif
 
     // 设置回调函数
     m_tray->SetShowWindowCallback([this]() {
@@ -546,17 +679,14 @@ bool Manager::InitializeTray() {
     });
 
     m_tray->Show();
-
-    // 设置托盘窗口的用户数据，指向TrayIcon实例
-    SetWindowLongPtr(m_tray_hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(m_tray.get()));
-
     return true;
 }
 
+#ifdef _WIN32
 HWND Manager::CreateHiddenWindow() {
     WNDCLASSEX wc = {0};
     wc.cbSize = sizeof(WNDCLASSEX);
-    wc.lpfnWndProc = TrayIcon::WindowProc;  // 使用TrayIcon的窗口过程
+    wc.lpfnWndProc = TrayIcon::WindowProc;
     wc.hInstance = GetModuleHandle(NULL);
     wc.lpszClassName = L"CLIManagerTrayWindow";
 
@@ -575,6 +705,7 @@ HWND Manager::CreateHiddenWindow() {
         NULL
     );
 }
+#endif
 
 void Manager::HandleMessages() {
 #ifdef USE_WIN32_BACKEND
@@ -584,7 +715,6 @@ void Manager::HandleMessages() {
             m_should_exit = true;
         }
         else if (msg.message == WM_CLOSE) {
-            // 主窗口关闭时隐藏到托盘，而不是退出
             if (msg.hwnd == m_hwnd) {
                 HideMainWindow();
                 continue;
@@ -598,15 +728,16 @@ void Manager::HandleMessages() {
     }
 #else
     // GLFW后端的消息处理
+#ifdef _WIN32
     MSG msg;
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
         if (msg.message == WM_QUIT) {
             m_should_exit = true;
         }
-
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+#endif
 
     glfwPollEvents();
     if (glfwWindowShouldClose(m_window)) {
@@ -800,11 +931,13 @@ void Manager::GlfwErrorCallback(int error, const char* description) {
 
 void Manager::CleanupTray() {
     m_tray.reset();
+#ifdef _WIN32
     if (m_tray_hwnd) {
         DestroyWindow(m_tray_hwnd);
         m_tray_hwnd = nullptr;
     }
     UnregisterClass(L"CLIManagerTrayWindow", GetModuleHandle(nullptr));
+#endif
 }
 
 void Manager::Shutdown() {
@@ -831,3 +964,11 @@ void Manager::Shutdown() {
 
     m_initialized = false;
 }
+
+#ifdef __APPLE__
+// macOS 特定的辅助函数声明
+extern "C" {
+    void* GetMacAppDelegate();
+    void* GetMacTrayIcon();
+}
+#endif

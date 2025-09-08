@@ -4,6 +4,7 @@
 #include "CLIProcess.h"
 #include <string>
 #include <map>
+#include <vector>
 #include <imgui.h>
 
 class AppState {
@@ -14,6 +15,12 @@ public:
     void LoadSettings();
     void SaveSettings();
     void ApplySettings();
+
+    // 新增：启动命令历史记录管理
+    void AddCommandToHistory(const std::string& command);
+    void RemoveCommandFromHistory(int index);
+    void ClearCommandHistory();
+    const std::vector<std::string>& GetCommandHistory() const { return command_history; }
 
     bool show_main_window;
     bool auto_start;
@@ -33,8 +40,12 @@ public:
     std::map<std::string, std::string> environment_variables;
     bool use_custom_environment;
 
-    // 新增：输出编码相关配置
+    // 输出编码相关配置
     OutputEncoding output_encoding;
+
+    // 新增：启动命令历史记录
+    std::vector<std::string> command_history;
+    int max_command_history;
 
     bool settings_dirty;
 
@@ -43,9 +54,13 @@ private:
     std::string SerializeEnvironmentVariables() const;
     void DeserializeEnvironmentVariables(const std::string& serialized);
 
-    // 新增：编码序列化辅助函数
+    // 编码序列化辅助函数
     std::string SerializeOutputEncoding() const;
     void DeserializeOutputEncoding(const std::string& serialized);
+
+    // 新增：命令历史记录序列化辅助函数
+    std::string SerializeCommandHistory() const;
+    void DeserializeCommandHistory(const std::string& serialized);
 };
 
 #endif // APP_STATE_H

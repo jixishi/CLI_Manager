@@ -2,59 +2,88 @@
 #include <algorithm>
 #include <cstdio>
 
+#ifdef _WIN32
 #include "Units.h"
+#else
+#include <iconv.h>
+#include <locale.h>
+#include <langinfo.h>
+#include <spawn.h>
+extern char **environ;
+#endif
 
 CLIProcess::CLIProcess() {
+#ifdef _WIN32
     ZeroMemory(&pi_, sizeof(pi_));
-    max_log_lines_ = 1000;
     hWritePipe_stdin_ = nullptr;
+#else
+    process_pid_ = -1;
+    pipe_stdout_[0] = pipe_stdout_[1] = -1;
+    pipe_stdin_[0] = pipe_stdin_[1] = -1;
+    process__running_ = false;
+#endif
+    max_log_lines_ = 1000;
     stop_timeout_ms_ = 5000;
-    output_encoding_ = OutputEncoding::AUTO_DETECT; // 新增：默认自动检测编码
+    output_encoding_ = OutputEncoding::AUTO_DETECT;
 }
 
 CLIProcess::~CLIProcess() {
     Stop();
+    CleanupResources();
 }
-
-// 新增：设置输出编码
+// 设置输出编码
 void CLIProcess::SetOutputEncoding(OutputEncoding encoding) {
     std::lock_guard<std::mutex> lock(encoding_mutex_);
     output_encoding_ = encoding;
     AddLog("输出编码已设置为: " + GetEncodingName(encoding));
 }
 
-// 新增：获取输出编码
+// 获取输出编码
 OutputEncoding CLIProcess::GetOutputEncoding() const {
     std::lock_guard<std::mutex> lock(encoding_mutex_);
     return output_encoding_;
 }
 
-// 新增：获取编码名称
+// 获取编码名称
 std::string CLIProcess::GetEncodingName(const OutputEncoding encoding) {
     switch (encoding) {
+        case OutputEncoding::AUTO_DETECT: return "自动检测";
         case OutputEncoding::UTF8: return "UTF-8";
+#ifdef _WIN32
         case OutputEncoding::GBK: return "GBK";
         case OutputEncoding::GB2312: return "GB2312";
-        case OutputEncoding::BIG5: return "Big5";
-        case OutputEncoding::SHIFT_JIS: return "Shift-JIS";
-        case OutputEncoding::AUTO_DETECT: return "自动检测";
-        default: return "未知";
+        case OutputEncoding::BIG5: return "BIG5";
+        case OutputEncoding::SHIFT_JIS: return "Shift_JIS";
+#else
+        case OutputEncoding::ISO_8859_1: return "ISO-8859-1";
+        case OutputEncoding::GB18030: return "GB18030";
+        case OutputEncoding::BIG5: return "BIG5";
+        case OutputEncoding::EUC_JP: return "EUC-JP";
+#endif
+        default: return "未知编码";
     }
 }
 
-// 新增：获取支持的编码列表
+// 获取支持的编码列表
 std::vector<std::pair<OutputEncoding, std::string>> CLIProcess::GetSupportedEncodings() {
     return {
         {OutputEncoding::AUTO_DETECT, "自动检测"},
         {OutputEncoding::UTF8, "UTF-8"},
+#ifdef _WIN32
         {OutputEncoding::GBK, "GBK (简体中文)"},
         {OutputEncoding::GB2312, "GB2312 (简体中文)"},
         {OutputEncoding::BIG5, "Big5 (繁体中文)"},
-        {OutputEncoding::SHIFT_JIS, "Shift-JIS (日文)"}
+        {OutputEncoding::SHIFT_JIS, "Shift-JIS (日文)"},
+#else
+        {OutputEncoding::ISO_8859_1, "ISO-8859-1"},
+        {OutputEncoding::GB18030, "GB18030"},
+        {OutputEncoding::BIG5, "BIG5"},
+        {OutputEncoding::EUC_JP, "EUC-JP"},
+#endif
     };
 }
 
-// 新增：根据编码获取代码页
+// 根据编码获取代码页
 UINT CLIProcess::GetCodePageFromEncoding(const OutputEncoding encoding) {
     switch (encoding) {
         case OutputEncoding::GBK: return 936;
@@ -65,7 +94,7 @@ UINT CLIProcess::GetCodePageFromEncoding(const OutputEncoding encoding) {
     }
 }
 
-// 新增：检查是否为有效的UTF-8
+// 检查是否为有效的UTF-8
 bool CLIProcess::IsValidUTF8(const std::string& str) {
     const auto* bytes = reinterpret_cast<const unsigned char*>(str.c_str());
     size_t len = str.length();
@@ -93,8 +122,8 @@ bool CLIProcess::IsValidUTF8(const std::string& str) {
     return true;
 }
 
-// 新增：转换到UTF-8
-std::string CLIProcess::ConvertToUTF8(const std::string& input, OutputEncoding encoding) {
+// 转换到UTF-8
+std::string CLIProcess::ConvertToUTF8(std::string& input, const OutputEncoding encoding) {
     if (input.empty()) return input;
 
     // 如果已经是UTF-8编码，直接返回
@@ -130,8 +159,8 @@ std::string CLIProcess::ConvertToUTF8(const std::string& input, OutputEncoding e
     return std::string(utf8Str.data());
 }
 
-// 新增：自动检测并转换到UTF-8
-std::string CLIProcess::DetectAndConvertToUTF8(const std::string& input) {
+// 自动检测并转换到UTF-8
+std::string CLIProcess::DetectAndConvertToUTF8(std::string& input) {
     if (input.empty()) return input;
 
     // 首先检查是否已经是有效的UTF-8
@@ -140,7 +169,7 @@ std::string CLIProcess::DetectAndConvertToUTF8(const std::string& input) {
     }
 
     // 尝试不同的编码进行转换
-    std::vector<OutputEncoding> encodingsToTry = {
+    const std::vector encodingsToTry = {
         OutputEncoding::GBK,
         OutputEncoding::GB2312,
         OutputEncoding::BIG5,
@@ -245,190 +274,185 @@ void CLIProcess::ClearEnvironmentVariables() {
 }
 
 void CLIProcess::Start(const std::string& command) {
-    if (IsRunning()) return;
     Stop();
+#ifdef _WIN32
+    SECURITY_ATTRIBUTES saAttr;
+    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    saAttr.bInheritHandle = TRUE;
+    saAttr.lpSecurityDescriptor = nullptr;
 
-    SECURITY_ATTRIBUTES sa;
-    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-    sa.bInheritHandle = TRUE;
-    sa.lpSecurityDescriptor = nullptr;
+    HANDLE hReadTmp = nullptr;
+    HANDLE hWriteTmp = nullptr;
 
-    if (!CreatePipe(&hReadPipe_, &hWritePipe_, &sa, 0)) {
-        AddLog("创建输出管道失败");
+    if (!CreatePipe(&hReadTmp, &hWriteTmp, &saAttr, 0)) {
+        return;
+    }
+    if (!SetHandleInformation(hReadTmp, HANDLE_FLAG_INHERIT, 0)) {
+        CloseHandle(hReadTmp);
+        CloseHandle(hWriteTmp);
         return;
     }
 
-    if (!CreatePipe(&hReadPipe_stdin_, &hWritePipe_stdin_, &sa, 0)) {
-        AddLog("创建输入管道失败");
-        CloseHandle(hReadPipe_);
-        CloseHandle(hWritePipe_);
+    HANDLE hReadTmp_stdin = nullptr;
+    HANDLE hWriteTmp_stdin = nullptr;
+    if (!CreatePipe(&hReadTmp_stdin, &hWriteTmp_stdin, &saAttr, 0)) {
+        CloseHandle(hReadTmp);
+        CloseHandle(hWriteTmp);
+        return;
+    }
+    if (!SetHandleInformation(hWriteTmp_stdin, HANDLE_FLAG_INHERIT, 0)) {
+        CloseHandle(hReadTmp);
+        CloseHandle(hWriteTmp);
+        CloseHandle(hReadTmp_stdin);
+        CloseHandle(hWriteTmp_stdin);
         return;
     }
 
-    STARTUPINFO si;
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    si.hStdOutput = hWritePipe_;
-    si.hStdError = hWritePipe_;
-    si.hStdInput = hReadPipe_stdin_;
-    si.wShowWindow = SW_HIDE;
-    ZeroMemory(&pi_, sizeof(pi_));
+    STARTUPINFOA siStartInfo;
+    ZeroMemory(&siStartInfo, sizeof(STARTUPINFOA));
+    siStartInfo.cb = sizeof(STARTUPINFOA);
+    siStartInfo.hStdError = hWriteTmp;
+    siStartInfo.hStdOutput = hWriteTmp;
+    siStartInfo.hStdInput = hReadTmp_stdin;
+    siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
 
-    // 转换命令为宽字符
-    std::wstring wcmd = StringToWide(command);
+    PROCESS_INFORMATION piProcInfo;
+    ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
 
-    // CreateProcess需要可修改的字符串
-    std::vector<wchar_t> cmdBuffer(wcmd.begin(), wcmd.end());
-    cmdBuffer.push_back(L'\0');
+    // Prepare environment block
+    std::string env_block;
+    {
+        std::lock_guard<std::mutex> lock(env_mutex_);
+        for (const auto& kv : environment_variables_) {
+            env_block += kv.first + "=" + kv.second + '\0';
+        }
+        env_block += '\0';
+    }
 
-    // 使用Windows API设置环境变量
-    std::vector<std::pair<std::string, std::string>> originalEnvVars;
-    bool envVarsSet = false;
+    BOOL bSuccess = CreateProcessA(
+        nullptr,
+        const_cast<char*>(command.c_str()),
+        nullptr,
+        nullptr,
+        TRUE,
+        CREATE_NO_WINDOW,
+        env_block.empty() ? nullptr : (LPVOID)env_block.data(),
+        nullptr,
+        &siStartInfo,
+        &piProcInfo);
 
-    if (!environment_variables_.empty()) {
-        envVarsSet = true;
+    CloseHandle(hWriteTmp);
+    CloseHandle(hReadTmp_stdin);
 
-        for (const auto& pair : environment_variables_) {
-            if (!pair.first.empty()) {
-                // 保存原始值（如果存在）
-                DWORD bufferSize = GetEnvironmentVariableA(pair.first.c_str(), nullptr, 0);
-                if (bufferSize > 0) {
-                    // 变量存在，保存原始值
-                    std::vector<char> buffer(bufferSize);
-                    if (GetEnvironmentVariableA(pair.first.c_str(), buffer.data(), bufferSize) > 0) {
-                        originalEnvVars.emplace_back(pair.first, std::string(buffer.data()));
-                    } else {
-                        originalEnvVars.emplace_back(pair.first, "");
-                    }
-                } else {
-                    // 变量不存在，标记为新变量（使用空字符串表示原来不存在）
-                    originalEnvVars.emplace_back(pair.first, "");
-                }
+    if (!bSuccess) {
+        CloseHandle(hReadTmp);
+        CloseHandle(hWriteTmp_stdin);
+        return;
+    }
 
-                // 设置新的环境变量值
-                if (SetEnvironmentVariableA(pair.first.c_str(), pair.second.c_str())) {
-                    // AddLog("设置环境变量: " + pair.first + "=" + pair.second);
-                } else {
-                    AddLog("设置环境变量失败: " + pair.first + " (错误代码: " + std::to_string(GetLastError()) + ")");
-                }
+    CloseProcessHandles();
+
+    pi_ = piProcInfo;
+    hReadPipe_ = hReadTmp;
+    hWritePipe_stdin_ = hWriteTmp_stdin;
+
+    // Start output reading thread
+    output_thread_ = std::thread(&CLIProcess::ReadOutput, this);
+
+#else
+    // Unix/Linux implementation using posix_spawn
+    int pipe_out[2];
+    int pipe_in[2];
+
+    if (pipe(pipe_out) < 0 || pipe(pipe_in) < 0) {
+        return;
+    }
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        // child process
+        close(pipe_out[0]);
+        dup2(pipe_out[1], STDOUT_FILENO);
+        dup2(pipe_out[1], STDERR_FILENO);
+        close(pipe_out[1]);
+
+        close(pipe_in[1]);
+        dup2(pipe_in[0], STDIN_FILENO);
+        close(pipe_in[0]);
+
+        // Prepare environment variables
+        if (!environment_variables_.empty()) {
+            for (const auto& kv : environment_variables_) {
+                setenv(kv.first.c_str(), kv.second.c_str(), 1);
             }
         }
 
-        // AddLog("环境变量设置完成，数量: " + std::to_string(environment_variables_.size()));
-    } else {
-        AddLog("未设置自定义环境变量，使用默认环境");
+        execl("/bin/sh", "sh", "-c", command.c_str(), (char*)nullptr);
+        _exit(127);
     }
+    else if (pid > 0) {
+        // parent process
+        close(pipe_out[1]);
+        close(pipe_in[0]);
 
-    BOOL result = CreateProcess(
-        nullptr,                    // lpApplicationName
-        cmdBuffer.data(),          // lpCommandLine
-        nullptr,                   // lpProcessAttributes
-        nullptr,                   // lpThreadAttributes
-        TRUE,                      // bInheritHandles
-        CREATE_NO_WINDOW,          // dwCreationFlags
-        nullptr,                   // lpEnvironment (使用nullptr让子进程继承当前环境)
-        nullptr,                   // lpCurrentDirectory
-        &si,                       // lpStartupInfo
-        &pi_                       // lpProcessInformation
-    );
+        process_pid_ = pid;
+        pipe_stdout_[0] = pipe_out[0];
+        pipe_stdout_[1] = pipe_out[1]; // closed already in parent, but keep for safety
+        pipe_stdin_[0] = pipe_in[0];   // closed already in parent, but keep for safety
+        pipe_stdin_[1] = pipe_in[1];
 
-    // 恢复原始环境变量
-    if (envVarsSet) {
-        for (const auto& pair : originalEnvVars) {
-            if (pair.second.empty()) {
-                // 原来不存在，删除变量
-                SetEnvironmentVariableA(pair.first.c_str(), nullptr);
-            } else {
-                // 恢复原始值
-                SetEnvironmentVariableA(pair.first.c_str(), pair.second.c_str());
-            }
-        }
+        process_running_ = true;
+
+        // Start output reading thread
+        output_thread_ = std::thread(&CLIProcess::ReadOutput, this);
     }
-
-    if (result) {
-        AddLog("进程已启动: " + command);
-
-        CloseHandle(hWritePipe_);
-        CloseHandle(hReadPipe_stdin_);
-        hWritePipe_ = nullptr;
-        hReadPipe_stdin_ = nullptr;
-
-        output_thread_ = std::thread([this]() {
-            ReadOutput();
-        });
-    }
-    else {
-        DWORD err = GetLastError();
-
-        // 获取详细的错误信息
-        LPWSTR messageBuffer = nullptr;
-        size_t size = FormatMessageW(
-            FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-            nullptr, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-            (LPWSTR)&messageBuffer, 0, nullptr);
-
-        std::string errorMsg = "CreateProcess 失败 (错误代码: " + std::to_string(err) + ")";
-        if (messageBuffer) {
-            std::wstring wErrorMsg(messageBuffer);
-            errorMsg += " - " + WideToString(wErrorMsg);
-            LocalFree(messageBuffer);
-        }
-
-        AddLog(errorMsg);
-
-        // 清理资源
-        CloseHandle(hReadPipe_);
-        CloseHandle(hWritePipe_);
-        CloseHandle(hReadPipe_stdin_);
-        CloseHandle(hWritePipe_stdin_);
-        hReadPipe_ = hWritePipe_ = hReadPipe_stdin_ = hWritePipe_stdin_ = nullptr;
-    }
+#endif
 }
 
 void CLIProcess::Stop() {
-    bool useStopCommand = false;
-    std::string stopCmd;
-    int timeout = stop_timeout_ms_;
-
-    // 检查是否设置了停止命令
-    {
-        std::lock_guard<std::mutex> lock(stop_mutex_);
-        if (!stop_command_.empty() && IsRunning()) {
-            useStopCommand = true;
-            stopCmd = stop_command_;
+#ifdef _WIN32
+    std::lock_guard<std::mutex> lock(stop_mutex_);
+    if (pi_.hProcess != nullptr) {
+        if (!stop_command_.empty()) {
+            SendCommand(stop_command_);
+            // Wait for process to exit within timeout
+            WaitForSingleObject(pi_.hProcess, stop_timeout_ms_);
         }
-    }
-
-    if (useStopCommand) {
-        AddLog("尝试发送停止命令: " + stopCmd);
-        if (SendCommand(stopCmd)) {
-            // 等待进程正常退出
-            DWORD waitResult = WaitForSingleObject(pi_.hProcess, timeout);
-            if (waitResult == WAIT_OBJECT_0) {
-                // 进程已正常退出
-                CloseProcessHandles();
-                AddLog("进程已通过停止命令正常退出");
-                return;
-            }
-            AddLog("停止命令超时，将强制终止进程");
-        } else {
-            AddLog("发送停止命令失败，将强制终止进程");
-        }
-    }
-
-    // 强制终止进程
-    if (pi_.hProcess) {
         TerminateProcess(pi_.hProcess, 0);
+        WaitForSingleObject(pi_.hProcess, INFINITE);
         CloseProcessHandles();
-        AddLog("进程已强制终止");
     }
+#else
+    if (process_running_) {
+        std::lock_guard<std::mutex> lock(stop_mutex_);
+        if (!stop_command_.empty()) {
+            SendCommand(stop_command_);
+            // Wait for termination or timeout
+            int status = 0;
+            for (int i = 0; i < stop_timeout_ms_/100; ++i) {
+                pid_t result = waitpid(process_pid_, &status, WNOHANG);
+                if (result == process_pid_) {
+                    process_running_ = false;
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+        if (process_running_) {
+            kill(process_pid_, SIGKILL);
+            waitpid(process_pid_, nullptr, 0);
+            process_running_ = false;
+        }
+        CloseProcessHandles();
+    }
+#endif
 
-    // 关闭管道和线程
-    CleanupResources();
+    if (output_thread_.joinable()) {
+        output_thread_.join();
+    }
 }
 
-// 新增：关闭进程句柄的辅助函数
+// 关闭进程句柄的辅助函数
 void CLIProcess::CloseProcessHandles() {
     if (pi_.hProcess) {
         CloseHandle(pi_.hProcess);
@@ -440,7 +464,7 @@ void CLIProcess::CloseProcessHandles() {
     }
 }
 
-// 新增：清理资源的辅助函数
+// 清理资源的辅助函数
 void CLIProcess::CleanupResources() {
     // 关闭输入管道写入端（通知进程停止）
     if (hWritePipe_stdin_) {
@@ -494,7 +518,9 @@ const std::vector<std::string>& CLIProcess::GetLogs() const {
     return logs_;
 }
 
-bool CLIProcess::SendCommand(const std::string& command) {
+
+bool CLIProcess::SendCommand(const std::string &command) {
+#ifdef _WIN32
     if (!IsRunning() || !hWritePipe_stdin_) {
         return false;
     }
@@ -506,11 +532,20 @@ bool CLIProcess::SendCommand(const std::string& command) {
                  static_cast<DWORD>(fullCommand.length()), &bytesWritten, nullptr)) {
         AddLog("> " + command);
         return true;
-    }
+                 }
     return false;
+#else
+        if (!process_running_ || pipe_stdin_[1] < 0) return false;
+
+        std::string cmd = command + "\n";
+        ssize_t written = write(pipe_stdin_[1], cmd.c_str(), cmd.size());
+        return written == (ssize_t)cmd.size();
+#endif
 }
 
+
 void CLIProcess::CopyLogsToClipboard() const {
+#ifdef _WIN32
     std::lock_guard<std::mutex> lock(logs_mutex_);
     if (logs_.empty()) return;
 
@@ -542,13 +577,46 @@ void CLIProcess::CopyLogsToClipboard() const {
         }
         CloseClipboard();
     }
+#else
+    // Unix / macOS, use xclip or pbcopy
+    std::string clipboard_text;
+    {
+        std::lock_guard<std::mutex> lock(logs_mutex_);
+        for (const auto& line : logs_) {
+            clipboard_text += line + "\n";
+        }
+    }
+    FILE* pipe = popen("pbcopy", "w");
+    if (!pipe) {
+        pipe = popen("xclip -selection clipboard", "w");
+    }
+    if (pipe) {
+        fwrite(clipboard_text.c_str(), 1, clipboard_text.size(), pipe);
+        pclose(pipe);
+    }
+#endif
 }
 
-bool CLIProcess::IsRunning() const { 
-    return pi_.hProcess != nullptr;
+bool CLIProcess::IsRunning() const {
+#ifdef _WIN32
+    if (pi_.hProcess == nullptr) return false;
+
+    DWORD status = WaitForSingleObject(pi_.hProcess, 0);
+    return status == WAIT_TIMEOUT;
+#else
+    if (!process_running_) return false;
+
+    int status;
+    pid_t result = waitpid(process_pid_, &status, WNOHANG);
+    if (result == 0) return true; // still running
+    process_running_ = false;
+    return false;
+#endif
 }
+
 
 void CLIProcess::ReadOutput() {
+#ifdef _WIN32
     constexpr int BUFFER_SIZE = 4096;
     char buffer[BUFFER_SIZE];
     DWORD bytesRead;
@@ -562,7 +630,7 @@ void CLIProcess::ReadOutput() {
         buffer[bytesRead] = '\0';
         std::string output(buffer);
 
-        // 新增：根据设置的编码转换输出
+        // 根据设置的编码转换输出
         OutputEncoding currentEncoding;
         {
             std::lock_guard<std::mutex> lock(encoding_mutex_);
@@ -599,4 +667,25 @@ void CLIProcess::ReadOutput() {
             partialLine = convertedOutput.substr(start);
         }
     }
+#else
+const int buffer_size = 4096;
+char buffer[buffer_size];
+ssize_t bytes_read = 0;
+while (process_running_) {
+    bytes_read = read(pipe_stdout_[0], buffer, buffer_size - 1);
+    if (bytes_read <= 0) break;
+    buffer[bytes_read] = '\0';
+
+    std::string utf8_str;
+    {
+        std::lock_guard<std::mutex> lock(encoding_mutex_);
+        if (output_encoding_ == OutputEncoding::AUTO_DETECT) {
+            utf8_str = DetectAndConvertToUTF8(std::string(buffer));
+        } else {
+            utf8_str = ConvertToUTF8(std::string(buffer), output_encoding_);
+        }
+    }
+    AddLog(utf8_str);
+}
+#endif
 }

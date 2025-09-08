@@ -10,12 +10,20 @@
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
 #else
+#ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
+#include <windows.h>
+#elif __APPLE__
+#define GLFW_EXPOSE_NATIVE_COCOA
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+#else
+#include <GLFW/glfw3.h>
+#endif
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
-#include <windows.h>
 #endif
 
 #include <memory>
@@ -33,6 +41,8 @@ public:
     void OnTrayExit();
 
     AppState m_app_state;
+
+
 private:
     // UI渲染
     void RenderUI();
@@ -41,7 +51,7 @@ private:
     void RenderSettingsMenu();
     void RenderStopCommandSettings();
     void RenderEnvironmentVariablesSettings();
-    void RenderOutputEncodingSettings(); // 新增：输出编码设置UI
+    void RenderOutputEncodingSettings();
 
     // 事件处理
     void HandleMessages();
@@ -75,10 +85,12 @@ private:
     // 托盘相关
     bool InitializeTray();
     void CleanupTray();
+#ifdef _WIN32
     static HWND CreateHiddenWindow();
+    HWND m_tray_hwnd = nullptr;
+#endif
 
     std::unique_ptr<TrayIcon> m_tray;
-    HWND m_tray_hwnd = nullptr;
 
     // 控制标志
     bool m_should_exit = false;
@@ -92,6 +104,8 @@ private:
     char env_value_input_[512] = {};
     bool show_env_settings_ = false;
 
-    // 新增：编码设置UI状态
+    // 编码设置UI状态
     bool show_encoding_settings_ = false;
+    // 历史命令UI状态
+    bool show_command_history_;
 };
