@@ -17,6 +17,8 @@ public:
 #ifdef _WIN32
     TrayIcon(HWND hwnd, HICON icon);
     void UpdateWebUrl(const std::wstring& url);
+
+    void UpdateStatus(const std::wstring &status, const std::wstring &pid);
     // 静态窗口过程
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 #else
@@ -45,6 +47,8 @@ private:
     HICON m_icon;
     NOTIFYICONDATA m_nid{};
     std::wstring m_web_url;
+    std::wstring m_status;
+    std::wstring m_pid;
     HMENU m_menu;
 #else
     void ShowMacTrayIcon();

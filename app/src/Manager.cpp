@@ -27,14 +27,16 @@ bool Manager::Initialize() {
     // 初始化ImGui
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    ImGuiIO &io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // Enable Docking
+//    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;       // Enable Multi-Viewport / Platform Windows
     io.ConfigViewportsNoAutoMerge = true;
     io.IniFilename = "imgui.ini";
 
     ImGui::StyleColorsDark();
-    ImGuiStyle& style = ImGui::GetStyle();
+    ImGuiStyle &style = ImGui::GetStyle();
     if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
         style.WindowRounding = 0.0f;
         style.Colors[ImGuiCol_WindowBg].w = 1.0f;
@@ -59,16 +61,16 @@ bool Manager::Initialize() {
     ImGui_ImplOpenGL3_Init(m_glsl_version);
     float xscale, yscale;
     glfwGetWindowContentScale(m_window, &xscale, &yscale);
-    m_dpi_scale=xscale;
+    m_dpi_scale = xscale;
 #endif
 
     // 加载字体
 #ifdef _WIN32
-    ImFont* font = io.Fonts->AddFontFromFileTTF(
-        "C:/Windows/Fonts/msyh.ttc",
-        16.0f*m_dpi_scale,
-        nullptr,
-        io.Fonts->GetGlyphRangesChineseFull()
+    ImFont *font = io.Fonts->AddFontFromFileTTF(
+            "C:/Windows/Fonts/msyh.ttc",
+            16.0f * m_dpi_scale,
+            nullptr,
+            io.Fonts->GetGlyphRangesChineseFull()
     );
 #elif __APPLE__
     // macOS 中文字体路径
@@ -112,6 +114,7 @@ bool Manager::Initialize() {
 
 #ifdef _WIN32
     m_tray->UpdateWebUrl(StringToWide(m_app_state.web_url));
+
 #else
     m_tray->UpdateWebUrl(m_app_state.web_url);
 #endif
@@ -120,7 +123,7 @@ bool Manager::Initialize() {
     if (m_app_state.auto_start && strlen(m_app_state.command_input) > 0) {
         m_app_state.cli_process.Start(m_app_state.command_input);
     }
-
+    m_tray->UpdateStatus(m_app_state.cli_process.IsRunning() ? L"运行中" : L"已停止", m_app_state.cli_process.GetPid());
     m_initialized = true;
     return true;
 }
@@ -200,22 +203,41 @@ void Manager::RenderUI() {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(display_w, display_h));
 
+    if (m_fullscreen) {
+        const ImGuiViewport *viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(viewport->WorkPos);
+        ImGui::SetNextWindowSize(viewport->WorkSize);
+        ImGui::SetNextWindowViewport(viewport->ID);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+        window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+                        ImGuiWindowFlags_NoMove;
+        window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+    } else {
+        dockspace_flags &= ~ImGuiDockNodeFlags_PassthruCentralNode;
+    }
+    if (dockspace_flags & ImGuiDockNodeFlags_PassthruCentralNode)
+        window_flags |= ImGuiWindowFlags_NoBackground;
+    if (!m_padding)
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    if (!m_padding)
+        ImGui::PopStyleVar();
+    if (m_fullscreen)
+        ImGui::PopStyleVar(2);    // Submit the DockSpace
     ImGui::Begin("CLI程序管理工具", &m_app_state.show_main_window,
-                 ImGuiWindowFlags_NoTitleBar |
-                 ImGuiWindowFlags_NoResize |
-                 ImGuiWindowFlags_NoMove |
-                 ImGuiWindowFlags_NoCollapse |
-                 ImGuiWindowFlags_MenuBar);
+                 window_flags);
 
     RenderMenuBar();
 
     // 创建主要的Docking空间
-    ImGuiID  m_dockspace_id = ImGui::GetID("MainDockSpace");
-    ImGui::DockSpace( m_dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
+    ImGuiID m_dockspace_id = ImGui::GetID("MainDockSpace");
+    ImGui::DockSpace(m_dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags | ImGuiDockNodeFlags_NoTabBar);
 
-    // 设置默认布局（仅在第一次运行时）
-    SetupDefaultDockingLayout( m_dockspace_id);
-
+    // 设置默认布局(仅在第一次运行时)
+    SetupDefaultDockingLayout(m_dockspace_id);
+    ImGuiWindowClass window_class;
+    window_class.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoWindowMenuButton;
+    ImGui::SetNextWindowClass(&window_class);
     RenderMainContent();
 
     ImGui::End();
@@ -272,10 +294,39 @@ void Manager::RenderMenuBar() {
             RenderLayoutMenu();
             ImGui::EndMenu();
         }
+
+        // 添加主题菜单
         if (ImGui::BeginMenu("主题")) {
             if (ImGui::MenuItem("暗黑(Dark)")) { ImGui::StyleColorsDark(); }
             if (ImGui::MenuItem("明亮(Light)")) { ImGui::StyleColorsLight(); }
             if (ImGui::MenuItem("经典(Classic)")) { ImGui::StyleColorsClassic(); }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("选项(Options)")) {
+            ImGui::MenuItem("全屏(Fullscreen)", nullptr, &m_fullscreen);
+            ImGui::MenuItem("填充(Padding)", nullptr, &m_padding);
+            ImGui::Separator();
+            if (ImGui::MenuItem("标志：不分割(Flag: NoSplit)", "", (dockspace_flags & ImGuiDockNodeFlags_NoSplit) !=
+                                                                  0)) { dockspace_flags ^= ImGuiDockNodeFlags_NoSplit; }
+            if (ImGui::MenuItem("标志：不调整大小(Flag: NoResize)", "",
+                                (dockspace_flags & ImGuiDockNodeFlags_NoResize) !=
+                                0)) { dockspace_flags ^= ImGuiDockNodeFlags_NoResize; }
+            if (ImGui::MenuItem("标志：不停靠在中心节点(Flag: NoDockingInCentralNode)", "",
+                                (dockspace_flags & ImGuiDockNodeFlags_NoDockingInCentralNode) !=
+                                0)) { dockspace_flags ^= ImGuiDockNodeFlags_NoDockingInCentralNode; }
+            if (ImGui::MenuItem("标志：自动隐藏选项卡栏(Flag: AutoHideTabBar)", "",
+                                (dockspace_flags & ImGuiDockNodeFlags_AutoHideTabBar) !=
+                                0)) { dockspace_flags = ImGuiDockNodeFlags_AutoHideTabBar; }
+            if (ImGui::MenuItem("标志：中心节点筛选器(Flag: PassthruCentralNode)", "",
+                                (dockspace_flags & ImGuiDockNodeFlags_PassthruCentralNode) != 0,
+                                m_fullscreen)) { dockspace_flags ^= ImGuiDockNodeFlags_PassthruCentralNode; }
+            ImGui::Separator();
+            //不关闭菜单
+            if (ImGui::MenuItem("关闭(Close)", nullptr, !m_app_state.show_main_window)) {
+                HideMainWindow();
+            }
+
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -303,17 +354,17 @@ void Manager::RenderLayoutMenu() {
     if (ImGui::BeginMenu("预设布局")) {
         if (ImGui::MenuItem("经典布局 (左控制右日志)")) {
             m_apply_preset_layout = true;
-            m_pending_preset=LayoutPreset::Classic;
+            m_pending_preset = LayoutPreset::Classic;
         }
 
         if (ImGui::MenuItem("开发布局 (上控制下日志)")) {
             m_apply_preset_layout = true;
-            m_pending_preset=LayoutPreset::Development;
+            m_pending_preset = LayoutPreset::Development;
         }
 
         if (ImGui::MenuItem("监控布局 (日志为主)")) {
             m_apply_preset_layout = true;
-            m_pending_preset=LayoutPreset::Monitoring;
+            m_pending_preset = LayoutPreset::Monitoring;
         }
 
         ImGui::EndMenu();
@@ -321,18 +372,18 @@ void Manager::RenderLayoutMenu() {
 }
 
 void Manager::ApplyPresetLayout(LayoutPreset preset) {
-    ImGuiID  m_dockspace_id = ImGui::GetID("MainDockSpace");
+    ImGuiID m_dockspace_id = ImGui::GetID("MainDockSpace");
     // 清除现有布局
-    ImGui::DockBuilderRemoveNode( m_dockspace_id);
-    ImGui::DockBuilderAddNode( m_dockspace_id, ImGuiDockNodeFlags_DockSpace);
-    ImGui::DockBuilderSetNodeSize( m_dockspace_id, ImGui::GetMainViewport()->Size);
+    ImGui::DockBuilderRemoveNode(m_dockspace_id);
+    ImGui::DockBuilderAddNode(m_dockspace_id, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(m_dockspace_id, ImGui::GetMainViewport()->Size);
 
     ImGuiID dock_1, dock_2, dock_3;
 
     switch (preset) {
         case LayoutPreset::Classic: {
             // 左右分割 (左30%，右70%)
-            ImGui::DockBuilderSplitNode( m_dockspace_id, ImGuiDir_Left, 0.3f, &dock_1, &dock_2);
+            ImGui::DockBuilderSplitNode(m_dockspace_id, ImGuiDir_Left, 0.3f, &dock_1, &dock_2);
             // 右侧上下分割 (上30%，下70%)
             ImGui::DockBuilderSplitNode(dock_2, ImGuiDir_Up, 0.3f, &dock_2, &dock_3);
 
@@ -344,7 +395,7 @@ void Manager::ApplyPresetLayout(LayoutPreset preset) {
 
         case LayoutPreset::Development: {
             // 上下分割 (上40%，下60%)
-            ImGui::DockBuilderSplitNode( m_dockspace_id, ImGuiDir_Up, 0.4f, &dock_1, &dock_2);
+            ImGui::DockBuilderSplitNode(m_dockspace_id, ImGuiDir_Up, 0.4f, &dock_1, &dock_2);
             // 上侧左右分割 (左60%，右40%)
             ImGui::DockBuilderSplitNode(dock_1, ImGuiDir_Left, 0.6f, &dock_1, &dock_3);
 
@@ -356,7 +407,7 @@ void Manager::ApplyPresetLayout(LayoutPreset preset) {
 
         case LayoutPreset::Monitoring: {
             // 上下分割 (上20%，下80%)
-            ImGui::DockBuilderSplitNode( m_dockspace_id, ImGuiDir_Up, 0.2f, &dock_1, &dock_2);
+            ImGui::DockBuilderSplitNode(m_dockspace_id, ImGuiDir_Up, 0.2f, &dock_1, &dock_2);
             // 上侧左右分割 (左70%，右30%)
             ImGui::DockBuilderSplitNode(dock_1, ImGuiDir_Left, 0.7f, &dock_1, &dock_3);
 
@@ -368,7 +419,7 @@ void Manager::ApplyPresetLayout(LayoutPreset preset) {
     }
 
     // 完成布局构建并强制应用
-    ImGui::DockBuilderFinish( m_dockspace_id);
+    ImGui::DockBuilderFinish(m_dockspace_id);
 }
 
 void Manager::SaveCurrentLayout() {
@@ -377,7 +428,7 @@ void Manager::SaveCurrentLayout() {
 
     // 获取当前ImGui布局数据
     size_t data_size = 0;
-    const char* data = ImGui::SaveIniSettingsToMemory(&data_size);
+    const char *data = ImGui::SaveIniSettingsToMemory(&data_size);
 
     if (data && data_size > 0) {
         std::ofstream file(layout_file, std::ios::binary);
@@ -417,13 +468,14 @@ void Manager::LoadSavedLayout() {
 void Manager::RenderStatusMessages() {
     // 渲染保存成功提示
     if (m_show_save_success) {
-        ImGui::SetNextWindowPos(ImVec2(ImGui::GetMainViewport()->Size.x * 0.5f, 50), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+        ImGui::SetNextWindowPos(ImVec2(ImGui::GetMainViewport()->Size.x * 0.5f, 50), ImGuiCond_Always,
+                                ImVec2(0.5f, 0.0f));
         ImGui::SetNextWindowBgAlpha(0.8f);
 
         if (ImGui::Begin("SaveSuccess", nullptr,
-                        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-                        ImGuiWindowFlags_AlwaysAutoResize)) {
+                         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "布局已保存");
         }
         ImGui::End();
@@ -436,13 +488,14 @@ void Manager::RenderStatusMessages() {
 
     // 渲染加载成功提示
     if (m_show_load_success) {
-        ImGui::SetNextWindowPos(ImVec2(ImGui::GetMainViewport()->Size.x * 0.5f, 50), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+        ImGui::SetNextWindowPos(ImVec2(ImGui::GetMainViewport()->Size.x * 0.5f, 50), ImGuiCond_Always,
+                                ImVec2(0.5f, 0.0f));
         ImGui::SetNextWindowBgAlpha(0.8f);
 
         if (ImGui::Begin("LoadSuccess", nullptr,
-                        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-                        ImGuiWindowFlags_AlwaysAutoResize)) {
+                         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "布局已加载");
         }
         ImGui::End();
@@ -460,8 +513,8 @@ void Manager::RenderMainContent() {
 
     // 控制面板窗口
     if (ImGui::Begin("控制面板", nullptr, ImGuiWindowFlags_NoCollapse)) {
-        float buttonWidth = 80.0f * m_dpi_scale;
-        float buttonHeight = 40.0f * m_dpi_scale;
+        float buttonWidth = 40.0f * m_dpi_scale;
+        float buttonHeight = 25.0f * m_dpi_scale;
         float inputWidth = ImGui::GetContentRegionAvail().x * 0.8f;
         RenderControlPanel(buttonWidth, buttonHeight, inputWidth);
     }
@@ -475,22 +528,12 @@ void Manager::RenderMainContent() {
 
     // 命令发送窗口
     if (ImGui::Begin("命令发送", nullptr, ImGuiWindowFlags_NoCollapse)) {
-        float buttonWidth = 80.0f * m_dpi_scale;
+        float buttonWidth = 40.0f * m_dpi_scale;
         float inputWidth = ImGui::GetContentRegionAvail().x * 0.8f;
         RenderCommandPanel(buttonWidth, inputWidth);
     }
     ImGui::End();
 }
-
-// void Manager::RenderMenuBar() {
-//     if (ImGui::BeginMenuBar()) {
-//         if (ImGui::BeginMenu("设置")) {
-//             RenderSettingsMenu();
-//             ImGui::EndMenu();
-//         }
-//         ImGui::EndMenuBar();
-//     }
-// }
 
 void Manager::RenderSettingsMenu() {
     if (ImGui::MenuItem("开机自启动", nullptr, m_app_state.auto_start)) {
@@ -602,7 +645,7 @@ void Manager::RenderEnvironmentVariablesSettings() {
             if (ImGui::BeginChild("EnvVarsList", ImVec2(0, 150), true)) {
                 std::vector<std::string> keysToRemove;
 
-                for (const auto& pair : m_app_state.environment_variables) {
+                for (const auto &pair: m_app_state.environment_variables) {
                     ImGui::PushID(pair.first.c_str());
 
                     // 显示环境变量
@@ -618,7 +661,7 @@ void Manager::RenderEnvironmentVariablesSettings() {
                 }
 
                 // 删除标记的环境变量
-                for (const auto& key : keysToRemove) {
+                for (const auto &key: keysToRemove) {
                     m_app_state.environment_variables.erase(key);
                     m_app_state.cli_process.RemoveEnvironmentVariable(key);
                     m_app_state.settings_dirty = true;
@@ -637,7 +680,8 @@ void Manager::RenderEnvironmentVariablesSettings() {
         }
 
         ImGui::Spacing();
-        ImGui::TextWrapped("说明：启用后，CLI程序将使用这些自定义环境变量。这些变量会与系统环境变量合并，同名变量会被覆盖。");
+        ImGui::TextWrapped(
+                "说明：启用后，CLI程序将使用这些自定义环境变量。这些变量会与系统环境变量合并，同名变量会被覆盖。");
 
         ImGui::Unindent();
     } else {
@@ -658,8 +702,8 @@ void Manager::RenderOutputEncodingSettings() {
     int currentEncodingIndex = static_cast<int>(m_app_state.output_encoding);
 
     // 创建编码名称数组用于Combo
-    std::vector<const char*> encodingNames;
-    for (const auto& encoding : supportedEncodings) {
+    std::vector<const char *> encodingNames;
+    for (const auto &encoding: supportedEncodings) {
         encodingNames.push_back(encoding.second.c_str());
     }
 
@@ -674,7 +718,7 @@ void Manager::RenderOutputEncodingSettings() {
     // 显示当前编码信息
     ImGui::SameLine();
     ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "当前: %s",
-                      CLIProcess::GetEncodingName(m_app_state.output_encoding).c_str());
+                       CLIProcess::GetEncodingName(m_app_state.output_encoding).c_str());
 
     // 编码说明
     ImGui::Spacing();
@@ -685,179 +729,6 @@ void Manager::RenderOutputEncodingSettings() {
     ImGui::BulletText("Big5：适用于繁体中文程序");
     ImGui::BulletText("Shift-JIS：适用于日文程序");
 }
-
-// void Manager::RenderMainContent() {
-//     float buttonWidth = 80.0f * m_dpi_scale;
-//     float buttonHeight = 40.0f * m_dpi_scale;
-//     float inputWidth = ImGui::GetContentRegionAvail().x * 0.5f; // 调整输入框宽度为50%
-//
-//     // 启动命令输入区域
-//     ImGui::BeginGroup();
-//     ImGui::Text("启动命令");
-//
-//     // 命令输入框和历史记录按钮
-//     ImGui::SetNextItemWidth(inputWidth);
-//     if (ImGui::InputText("##启动命令", m_app_state.command_input, IM_ARRAYSIZE(m_app_state.command_input))) {
-//         m_app_state.settings_dirty = true;
-//     }
-//
-//     ImGui::SameLine();
-//     if (ImGui::Button("历史记录", ImVec2(100.0f * m_dpi_scale, 0))) {
-//         show_command_history_ = !show_command_history_;
-//     }
-//
-//     // 显示命令历史记录下拉列表
-//     if (show_command_history_) {
-//         const auto& history = m_app_state.GetCommandHistory();
-//
-//         if (!history.empty()) {
-//             ImGui::Indent();
-//             ImGui::Text("选择历史命令 (%d个):", static_cast<int>(history.size()));
-//
-//             if (ImGui::BeginChild("CommandHistory", ImVec2(0, 120), true)) {
-//                 for (int i = 0; i < static_cast<int>(history.size()); ++i) {
-//                     ImGui::PushID(i);
-//
-//                     // 选择按钮
-//                     if (ImGui::Button("选择", ImVec2(50.0f * m_dpi_scale, 0))) {
-//                         strncpy_s(m_app_state.command_input, history[i].c_str(), sizeof(m_app_state.command_input) - 1);
-//                         show_command_history_ = false;
-//                         ImGui::PopID();
-//                         break;
-//                     }
-//                     ImGui::SameLine();
-//
-//                     // 显示命令内容（限制显示长度）
-//                     std::string displayCommand = history[i];
-//                     if (displayCommand.length() > 60) {
-//                         displayCommand = displayCommand.substr(0, 57) + "...";
-//                     }
-//                     ImGui::TextUnformatted(displayCommand.c_str());
-//
-//                     // 鼠标悬停时显示完整命令
-//                     if (ImGui::IsItemHovered()) {
-//                         ImGui::SetTooltip("%s", history[i].c_str());
-//                     }
-//
-//                     ImGui::SameLine();
-//
-//                     // 删除按钮
-//                     if (ImGui::SmallButton("删除")) {
-//                         m_app_state.RemoveCommandFromHistory(i);
-//                         ImGui::PopID();
-//                         continue;
-//                     }
-//
-//                     ImGui::PopID();
-//                 }
-//             }
-//             ImGui::EndChild();
-//
-//             // 操作按钮
-//             if (ImGui::Button("清空所有历史记录")) {
-//                 m_app_state.ClearCommandHistory();
-//             }
-//             ImGui::SameLine();
-//
-//             ImGui::Unindent();
-//         } else {
-//             ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "暂无启动命令历史");
-//         }
-//     }
-//     ImGui::EndGroup();
-//
-//     ImGui::Spacing();
-//
-//
-//     ImGui::BeginGroup();
-//     if (ImGui::Button("启动", ImVec2(buttonWidth, buttonHeight))) {
-//         if (strlen(m_app_state.command_input) > 0) {
-//             m_app_state.cli_process.Start(m_app_state.command_input);
-//             m_app_state.AddCommandToHistory(m_app_state.command_input);
-//         }
-//     }
-//     ImGui::SameLine();
-//     if (ImGui::Button("停止", ImVec2(buttonWidth, buttonHeight))) {
-//         m_app_state.cli_process.Stop();
-//     }
-//     ImGui::SameLine();
-//     if (ImGui::Button("重启", ImVec2(buttonWidth, buttonHeight))) {
-//         if (strlen(m_app_state.command_input) > 0) {
-//             m_app_state.cli_process.Restart(m_app_state.command_input);
-//             m_app_state.AddCommandToHistory(m_app_state.command_input);
-//         }
-//     }
-//     ImGui::SameLine();
-//     if (ImGui::Button("清理日志", ImVec2(100.0f * m_dpi_scale, buttonHeight))) {
-//         m_app_state.cli_process.ClearLogs();
-//     }
-//     ImGui::EndGroup();
-//
-//     ImGui::Text("状态: %s", m_app_state.cli_process.IsRunning() ? "运行中" : "已停止");
-//
-//     ImGui::Separator();
-//     ImGui::Text("发送命令到CLI程序");
-//
-//     // 命令发送
-//     ImGui::BeginGroup();
-//     ImGui::SetNextItemWidth(inputWidth);
-//     bool sendCommandPressed = ImGui::InputText("##命令输入", m_app_state.send_command, IM_ARRAYSIZE(m_app_state.send_command),
-//                                               ImGuiInputTextFlags_EnterReturnsTrue);
-//     ImGui::SameLine();
-//     if (ImGui::Button("发送", ImVec2(buttonWidth, 0)) || sendCommandPressed) {
-//         if (m_app_state.cli_process.IsRunning() && strlen(m_app_state.send_command) > 0) {
-//             m_app_state.cli_process.SendCommand(m_app_state.send_command);
-//             memset(m_app_state.send_command, 0, sizeof(m_app_state.send_command));
-//         }
-//     }
-//     ImGui::EndGroup();
-//
-//     ImGui::Separator();
-//
-//     // 日志控制
-//     ImGui::BeginGroup();
-//     ImGui::Text("程序日志");
-//
-//     float logControlButtonWidth = 100.0f * m_dpi_scale;
-//     float checkboxWidth = 80.0f * m_dpi_scale;
-//     float statusTextWidth = 150.0f * m_dpi_scale;
-//
-//     // 计算所有右侧控件的总宽度
-//     float totalRightControlsWidth = logControlButtonWidth +
-//                                    ImGui::GetStyle().ItemSpacing.x +
-//                                    checkboxWidth +
-//                                    ImGui::GetStyle().ItemSpacing.x +
-//                                    statusTextWidth;
-//
-//     ImGui::SameLine();
-//     ImGui::SameLine(ImGui::GetContentRegionAvail().x - totalRightControlsWidth);
-//     if (ImGui::Button("复制日志", ImVec2(logControlButtonWidth, 0))) {
-//         m_app_state.cli_process.CopyLogsToClipboard();
-//     }
-//
-//     ImGui::SameLine();
-//     ImGui::Checkbox("自动滚动", &m_app_state.auto_scroll_logs);
-//
-//     ImGui::SameLine();
-//     ImGui::Text("行数: %d/%d",
-//                 static_cast<int>(m_app_state.cli_process.GetLogs().size()),
-//                 m_app_state.max_log_lines);
-//     ImGui::EndGroup();
-//
-//     float logHeight = ImGui::GetContentRegionAvail().y - ImGui::GetStyle().ItemSpacing.y;
-//     ImGui::BeginChild("Logs", ImVec2(0, logHeight), true, ImGuiWindowFlags_HorizontalScrollbar);
-//
-//     const auto& logs = m_app_state.cli_process.GetLogs();
-//     for (const auto& log : logs) {
-//         ImGui::TextUnformatted(log.c_str());
-//     }
-//
-//     if (m_app_state.auto_scroll_logs && ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
-//         ImGui::SetScrollHereY(1.0f);
-//     }
-//
-//     ImGui::EndChild();
-// }
 
 void Manager::RenderControlPanel(float buttonWidth, float buttonHeight, float inputWidth) {
     // 启动命令输入区域
@@ -870,7 +741,7 @@ void Manager::RenderControlPanel(float buttonWidth, float buttonHeight, float in
     }
 
     ImGui::SameLine();
-    if (ImGui::Button("历史记录", ImVec2(100.0f * m_dpi_scale, 0))) {
+    if (ImGui::Button("历史记录", ImVec2(80.0f * m_dpi_scale, 0))) {
         show_command_history_ = !show_command_history_;
     }
 
@@ -887,17 +758,23 @@ void Manager::RenderControlPanel(float buttonWidth, float buttonHeight, float in
         if (strlen(m_app_state.command_input) > 0) {
             m_app_state.cli_process.Start(m_app_state.command_input);
             m_app_state.AddCommandToHistory(m_app_state.command_input);
+            m_tray->UpdateStatus(m_app_state.cli_process.IsRunning() ? L"运行中" : L"已停止",
+                                 m_app_state.cli_process.GetPid());
         }
     }
     ImGui::SameLine();
     if (ImGui::Button("停止", ImVec2(buttonWidth, buttonHeight))) {
         m_app_state.cli_process.Stop();
+        m_tray->UpdateStatus(m_app_state.cli_process.IsRunning() ? L"运行中" : L"已停止",
+                             m_app_state.cli_process.GetPid());
     }
     ImGui::SameLine();
     if (ImGui::Button("重启", ImVec2(buttonWidth, buttonHeight))) {
         if (strlen(m_app_state.command_input) > 0) {
             m_app_state.cli_process.Restart(m_app_state.command_input);
             m_app_state.AddCommandToHistory(m_app_state.command_input);
+            m_tray->UpdateStatus(m_app_state.cli_process.IsRunning() ? L"运行中" : L"已停止",
+                                 m_app_state.cli_process.GetPid());
         }
     }
 
@@ -906,10 +783,10 @@ void Manager::RenderControlPanel(float buttonWidth, float buttonHeight, float in
     // 状态显示
     ImGui::SeparatorText("运行状态");
     ImVec4 statusColor = m_app_state.cli_process.IsRunning() ?
-                        ImVec4(0.0f, 1.0f, 0.0f, 1.0f) :
-                        ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
+                         ImVec4(0.0f, 1.0f, 0.0f, 1.0f) :
+                         ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
     ImGui::TextColored(statusColor, "状态: %s",
-                      m_app_state.cli_process.IsRunning() ? "运行中" : "已停止");
+                       m_app_state.cli_process.IsRunning() ? "运行中" : "已停止");
 }
 
 void Manager::RenderCommandPanel(float buttonWidth, float inputWidth) {
@@ -918,8 +795,8 @@ void Manager::RenderCommandPanel(float buttonWidth, float inputWidth) {
     // 命令发送
     ImGui::SetNextItemWidth(inputWidth);
     bool sendCommandPressed = ImGui::InputText("##命令输入", m_app_state.send_command,
-                                              IM_ARRAYSIZE(m_app_state.send_command),
-                                              ImGuiInputTextFlags_EnterReturnsTrue);
+                                               IM_ARRAYSIZE(m_app_state.send_command),
+                                               ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::SameLine();
     if (ImGui::Button("发送", ImVec2(buttonWidth, 0)) || sendCommandPressed) {
         if (m_app_state.cli_process.IsRunning() && strlen(m_app_state.send_command) > 0) {
@@ -937,8 +814,8 @@ void Manager::RenderCommandPanel(float buttonWidth, float inputWidth) {
 void Manager::RenderLogPanel() {
     // 日志控制工具栏
     if (ImGui::BeginTable("LogControls", 3, ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 120.0f * m_dpi_scale);
-        ImGui::TableSetupColumn("Settings", ImGuiTableColumnFlags_WidthFixed, 120.0f * m_dpi_scale);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 85.0f * m_dpi_scale);
+        ImGui::TableSetupColumn("Settings", ImGuiTableColumnFlags_WidthFixed, 100.0f * m_dpi_scale);
         ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthStretch);
 
         ImGui::TableNextRow();
@@ -969,7 +846,7 @@ void Manager::RenderLogPanel() {
 
     // 日志内容区域
     if (ImGui::BeginChild("LogContent", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar)) {
-        const auto& logs = m_app_state.cli_process.GetLogs();
+        const auto &logs = m_app_state.cli_process.GetLogs();
 
         // 使用ImGuiListClipper优化大量日志的渲染性能
         ImGuiListClipper clipper;
@@ -977,7 +854,7 @@ void Manager::RenderLogPanel() {
 
         while (clipper.Step()) {
             for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; i++) {
-                const std::string& log = logs[i];
+                const std::string &log = logs[i];
 
                 if (m_app_state.enable_colored_logs) {
                     RenderColoredLogLine(log);
@@ -997,207 +874,8 @@ void Manager::RenderLogPanel() {
     ImGui::EndChild();
 }
 
-ImVec4 Manager::GetLogLevelColor(const std::string& log) {
-    // 简单的日志级别颜色区分
-    if (log.find("错误") != std::string::npos || log.find("[E]") != std::string::npos ||
-        log.find("[ERROR]") != std::string::npos || log.find("error") != std::string::npos) {
-        return ImVec4(1.0f, 0.4f, 0.4f, 1.0f); // 红色
-    } else if (log.find("警告") != std::string::npos || log.find("[W]") != std::string::npos ||
-               log.find("[WARN]") != std::string::npos || log.find("warning") != std::string::npos) {
-        return ImVec4(1.0f, 1.0f, 0.4f, 1.0f); // 黄色
-    } else if (log.find("信息") != std::string::npos || log.find("[I]") != std::string::npos ||
-               log.find("[INFO]") != std::string::npos || log.find("info") != std::string::npos) {
-        return ImVec4(0.4f, 1.0f, 0.4f, 1.0f); // 绿色
-    }
-    return ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // 默认白色
-}
-
-void Manager::RenderColoredLogLine(const std::string& log) {
-    auto segments = ParseAnsiColorCodes(log);
-
-    if (segments.empty()) {
-        // 如果没有ANSI代码，使用简单的日志级别颜色
-        ImVec4 textColor = GetLogLevelColor(log);
-        ImGui::TextColored(textColor, "%s", log.c_str());
-        return;
-    }
-
-    // 渲染带颜色的文本段
-    bool first = true;
-    for (const auto& segment : segments) {
-        if (!first) {
-            ImGui::SameLine(0, 0); // 在同一行继续显示
-        }
-        first = false;
-
-        if (!segment.text.empty()) {
-            ImGui::TextColored(segment.color, "%s", segment.text.c_str());
-        }
-    }
-}
-
-std::vector<Manager::ColoredTextSegment> Manager::ParseAnsiColorCodes(const std::string& text) {
-    std::vector<ColoredTextSegment> segments;
-
-    if (text.empty()) {
-        return segments;
-    }
-
-    size_t pos = 0;
-    ImVec4 currentColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // 默认白色
-    bool isBold = false;
-
-    while (pos < text.length()) {
-        size_t escapePos = text.find('\033', pos);
-
-        if (escapePos == std::string::npos) {
-            // 没有更多转义序列，添加剩余文本
-            if (pos < text.length()) {
-                segments.push_back({text.substr(pos), currentColor});
-            }
-            break;
-        }
-
-        // 添加转义序列之前的文本
-        if (escapePos > pos) {
-            segments.push_back({text.substr(pos, escapePos - pos), currentColor});
-        }
-
-        // 解析ANSI转义序列
-        size_t codeStart = escapePos + 1;
-        if (codeStart < text.length() && text[codeStart] == '[') {
-            size_t codeEnd = text.find('m', codeStart);
-            if (codeEnd != std::string::npos) {
-                std::string colorCode = text.substr(codeStart + 1, codeEnd - codeStart - 1);
-                auto newColor = ParseAnsiColorCode(colorCode, currentColor, isBold);
-                currentColor = newColor.first;
-                isBold = newColor.second;
-                pos = codeEnd + 1;
-            } else {
-                // 无效的转义序列，跳过
-                pos = codeStart;
-            }
-        } else {
-            // 无效的转义序列，跳过
-            pos = codeStart;
-        }
-    }
-
-    return segments;
-}
-
-std::pair<ImVec4, bool> Manager::ParseAnsiColorCode(const std::string& code, const ImVec4& currentColor, bool currentBold) {
-    ImVec4 newColor = currentColor;
-    bool newBold = currentBold;
-
-    // 分割多个颜色代码（用分号分隔）
-    std::vector<int> codes;
-    std::stringstream ss(code);
-    std::string item;
-
-    while (std::getline(ss, item, ';')) {
-        if (!item.empty()) {
-            try {
-                codes.push_back(std::stoi(item));
-            } catch (const std::exception&) {
-                // 忽略无效的代码
-            }
-        }
-    }
-
-    // 如果没有代码，默认为0（重置）
-    if (codes.empty()) {
-        codes.push_back(0);
-    }
-
-    for (int colorCode : codes) {
-        switch (colorCode) {
-            case 0:  // 重置
-                newColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-                newBold = false;
-                break;
-            case 1:  // 粗体/亮色
-                newBold = true;
-                break;
-            case 22: // 正常强度
-                newBold = false;
-                break;
-
-            // 前景色 (30-37)
-            case 30: newColor = GetAnsiColor(0, newBold); break; // 黑色
-            case 31: newColor = GetAnsiColor(1, newBold); break; // 红色
-            case 32: newColor = GetAnsiColor(2, newBold); break; // 绿色
-            case 33: newColor = GetAnsiColor(3, newBold); break; // 黄色
-            case 34: newColor = GetAnsiColor(4, newBold); break; // 蓝色
-            case 35: newColor = GetAnsiColor(5, newBold); break; // 洋红
-            case 36: newColor = GetAnsiColor(6, newBold); break; // 青色
-            case 37: newColor = GetAnsiColor(7, newBold); break; // 白色
-            case 39: newColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f); break; // 默认前景色
-
-            // 亮色前景色 (90-97)
-            case 90: newColor = GetAnsiColor(8, false); break;  // 亮黑色（灰色）
-            case 91: newColor = GetAnsiColor(9, false); break;  // 亮红色
-            case 92: newColor = GetAnsiColor(10, false); break; // 亮绿色
-            case 93: newColor = GetAnsiColor(11, false); break; // 亮黄色
-            case 94: newColor = GetAnsiColor(12, false); break; // 亮蓝色
-            case 95: newColor = GetAnsiColor(13, false); break; // 亮洋红
-            case 96: newColor = GetAnsiColor(14, false); break; // 亮青色
-            case 97: newColor = GetAnsiColor(15, false); break; // 亮白色
-
-            // 背景色暂时忽略 (40-47, 100-107)
-            default:
-                // 处理256色和RGB色彩（38;5;n 和 38;2;r;g;b）
-                // 这里可以根据需要扩展
-                break;
-        }
-    }
-
-    return {newColor, newBold};
-}
-
-ImVec4 Manager::GetAnsiColor(int colorIndex, bool bright) {
-    // ANSI标准颜色表
-    static const ImVec4 ansiColors[16] = {
-        // 标准颜色 (0-7)
-        ImVec4(0.0f, 0.0f, 0.0f, 1.0f),     // 0: 黑色
-        ImVec4(0.8f, 0.0f, 0.0f, 1.0f),     // 1: 红色
-        ImVec4(0.0f, 0.8f, 0.0f, 1.0f),     // 2: 绿色
-        ImVec4(0.8f, 0.8f, 0.0f, 1.0f),     // 3: 黄色
-        ImVec4(0.0f, 0.0f, 0.8f, 1.0f),     // 4: 蓝色
-        ImVec4(0.8f, 0.0f, 0.8f, 1.0f),     // 5: 洋红
-        ImVec4(0.0f, 0.8f, 0.8f, 1.0f),     // 6: 青色
-        ImVec4(0.8f, 0.8f, 0.8f, 1.0f),     // 7: 白色
-
-        // 亮色 (8-15)
-        ImVec4(0.5f, 0.5f, 0.5f, 1.0f),     // 8: 亮黑色（灰色）
-        ImVec4(1.0f, 0.0f, 0.0f, 1.0f),     // 9: 亮红色
-        ImVec4(0.0f, 1.0f, 0.0f, 1.0f),     // 10: 亮绿色
-        ImVec4(1.0f, 1.0f, 0.0f, 1.0f),     // 11: 亮黄色
-        ImVec4(0.0f, 0.0f, 1.0f, 1.0f),     // 12: 亮蓝色
-        ImVec4(1.0f, 0.0f, 1.0f, 1.0f),     // 13: 亮洋红
-        ImVec4(0.0f, 1.0f, 1.0f, 1.0f),     // 14: 亮青色
-        ImVec4(1.0f, 1.0f, 1.0f, 1.0f),     // 15: 亮白色
-    };
-
-    if (colorIndex >= 0 && colorIndex < 16) {
-        ImVec4 color = ansiColors[colorIndex];
-
-        // 如果是粗体且是标准颜色（0-7），增加亮度
-        if (bright && colorIndex < 8) {
-            color.x = std::min(1.0f, color.x + 0.3f);
-            color.y = std::min(1.0f, color.y + 0.3f);
-            color.z = std::min(1.0f, color.z + 0.3f);
-        }
-
-        return color;
-    }
-
-    return ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // 默认白色
-}
-
-
 void Manager::RenderCommandHistory() {
-    const auto& history = m_app_state.GetCommandHistory();
+    const auto &history = m_app_state.GetCommandHistory();
 
     if (!history.empty()) {
         ImGui::Indent();
@@ -1378,6 +1056,7 @@ bool Manager::InitializeTray() {
 }
 
 #ifdef _WIN32
+
 HWND Manager::CreateHiddenWindow() {
     WNDCLASSEX wc = {0};
     wc.cbSize = sizeof(WNDCLASSEX);
@@ -1390,16 +1069,17 @@ HWND Manager::CreateHiddenWindow() {
     }
 
     return CreateWindowEx(
-        0,
-        wc.lpszClassName,
-        L"CLI Manager Tray Window",
-        0,
-        0, 0, 0, 0,
-        NULL, NULL,
-        wc.hInstance,
-        NULL
+            0,
+            wc.lpszClassName,
+            L"CLI Manager Tray Window",
+            0,
+            0, 0, 0, 0,
+            NULL, NULL,
+            wc.hInstance,
+            NULL
     );
 }
+
 #endif
 
 void Manager::HandleMessages() {
@@ -1446,8 +1126,8 @@ bool Manager::ShouldExit() const {
     return m_should_exit;
 }
 
-void Manager::ContentScaleCallback(GLFWwindow* window, float xscale, float yscale) {
-    if (auto* manager = static_cast<Manager*>(glfwGetWindowUserPointer(window))) {
+void Manager::ContentScaleCallback(GLFWwindow *window, float xscale, float yscale) {
+    if (auto *manager = static_cast<Manager *>(glfwGetWindowUserPointer(window))) {
         // 强制触发DPI更新
         manager->m_last_dpi_scale = 0.0f;
     }
@@ -1569,6 +1249,7 @@ void Manager::CleanupDirectX11() {
     }
 }
 #else
+
 bool Manager::InitializeGLFW() {
     glfwSetErrorCallback(GlfwErrorCallback);
     if (!glfwInit())
@@ -1597,13 +1278,15 @@ bool Manager::InitializeGLFW() {
 #endif
 
     int screenWidth, screenHeight;
-    GLFWmonitor* primaryMonitor = glfwGetPrimaryMonitor();
-    const GLFWvidmode* mode = glfwGetVideoMode(primaryMonitor);
+    GLFWmonitor *primaryMonitor = glfwGetPrimaryMonitor();
+    const GLFWvidmode *mode = glfwGetVideoMode(primaryMonitor);
     screenWidth = mode->width;
     screenHeight = mode->height;
 
     int windowWidth = static_cast<int>(screenWidth * 0.8);
     int windowHeight = static_cast<int>(screenHeight * 0.8);
+
+//    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);//窗口隐藏
 
     m_window = glfwCreateWindow(windowWidth, windowHeight, "CLI程序管理工具", nullptr, nullptr);
     if (!m_window)
@@ -1628,9 +1311,10 @@ void Manager::CleanupGLFW() {
     glfwTerminate();
 }
 
-void Manager::GlfwErrorCallback(int error, const char* description) {
+void Manager::GlfwErrorCallback(int error, const char *description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
+
 #endif
 
 void Manager::CleanupTray() {
@@ -1694,13 +1378,13 @@ void Manager::UpdateDPIScale() {
         ReloadFonts();
 
         // 缩放ImGui样式
-        ImGuiStyle& style = ImGui::GetStyle();
+        ImGuiStyle &style = ImGui::GetStyle();
         style.ScaleAllSizes(m_dpi_scale);
     }
 }
 
 void Manager::ReloadFonts() const {
-    ImGuiIO& io = ImGui::GetIO();
+    ImGuiIO &io = ImGui::GetIO();
 
     // 清除现有字体
     io.Fonts->Clear();
@@ -1716,7 +1400,8 @@ void Manager::ReloadFonts() const {
 
     // 尝试加载系统字体，失败则使用默认字体
 #ifdef _WIN32
-    io.Fonts->AddFontFromFileTTF("C:/Windows/Fonts/msyh.ttc", font_size, &font_config, io.Fonts->GetGlyphRangesChineseFull());
+    io.Fonts->AddFontFromFileTTF("C:/Windows/Fonts/msyh.ttc", font_size, &font_config,
+                                 io.Fonts->GetGlyphRangesChineseFull());
 #elif __APPLE__
     io.Fonts->AddFontFromFileTTF("/System/Library/Fonts/PingFang.ttc", font_size, &font_config, io.Fonts->GetGlyphRangesChineseFull());
 #else
@@ -1792,7 +1477,6 @@ void Manager::ReloadFonts() const {
     // OpenGL字体纹理重建会由ImGui自动处理
 #endif
 }
-
 
 
 #ifdef __APPLE__
