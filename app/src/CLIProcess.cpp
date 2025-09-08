@@ -26,7 +26,7 @@ CLIProcess::CLIProcess() {
     max_log_lines_ = 1000;
     stop_timeout_ms_ = 5000;
     output_encoding_ = OutputEncoding::AUTO_DETECT;
-    use_auto_working_dir_ = true; // 新增：默认启用自动工作目录
+    use_auto_working_dir_ = false; // 自动工作目录
 }
 
 CLIProcess::~CLIProcess() {
@@ -383,17 +383,17 @@ void CLIProcess::Start(const std::string& command) {
     Stop();
 
     // 确定工作目录
-    std::string working_dir;
+    std::wstring working_dir;
     {
         std::lock_guard<std::mutex> lock(working_dir_mutex_);
         if (use_auto_working_dir_) {
-            working_dir = ExtractDirectoryFromCommand(command);
+            working_dir = StringToWide(ExtractDirectoryFromCommand(command));
             if (working_dir.empty()) {
-                working_dir = std::filesystem::current_path().string();
+                working_dir = StringToWide(std::filesystem::current_path().string());
             }
             // AddLog("自动检测工作目录: " + working_dir);
         } else {
-            working_dir = working_directory_;
+            working_dir = StringToWide(working_directory_);
             if (!working_dir.empty()) {
                 // AddLog("使用指定工作目录: " + working_dir);
             }
@@ -401,192 +401,141 @@ void CLIProcess::Start(const std::string& command) {
     }
 
 #ifdef _WIN32
-    SECURITY_ATTRIBUTES saAttr;
-    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
-    saAttr.bInheritHandle = TRUE;
-    saAttr.lpSecurityDescriptor = nullptr;
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = nullptr;
 
-    HANDLE hReadTmp = nullptr;
-    HANDLE hWriteTmp = nullptr;
-
-    if (!CreatePipe(&hReadTmp, &hWriteTmp, &saAttr, 0)) {
-        return;
-    }
-    if (!SetHandleInformation(hReadTmp, HANDLE_FLAG_INHERIT, 0)) {
-        CloseHandle(hReadTmp);
-        CloseHandle(hWriteTmp);
+    if (!CreatePipe(&hReadPipe_, &hWritePipe_, &sa, 0)) {
+        AddLog("创建输出管道失败");
         return;
     }
 
-    HANDLE hReadTmp_stdin = nullptr;
-    HANDLE hWriteTmp_stdin = nullptr;
-    if (!CreatePipe(&hReadTmp_stdin, &hWriteTmp_stdin, &saAttr, 0)) {
-        CloseHandle(hReadTmp);
-        CloseHandle(hWriteTmp);
-        return;
-    }
-    if (!SetHandleInformation(hWriteTmp_stdin, HANDLE_FLAG_INHERIT, 0)) {
-        CloseHandle(hReadTmp);
-        CloseHandle(hWriteTmp);
-        CloseHandle(hReadTmp_stdin);
-        CloseHandle(hWriteTmp_stdin);
+    if (!CreatePipe(&hReadPipe_stdin_, &hWritePipe_stdin_, &sa, 0)) {
+        AddLog("创建输入管道失败");
+        CloseHandle(hReadPipe_);
+        CloseHandle(hWritePipe_);
         return;
     }
 
-    STARTUPINFOA siStartInfo;
-    ZeroMemory(&siStartInfo, sizeof(STARTUPINFOA));
-    siStartInfo.cb = sizeof(STARTUPINFOA);
-    siStartInfo.hStdError = hWriteTmp;
-    siStartInfo.hStdOutput = hWriteTmp;
-    siStartInfo.hStdInput = hReadTmp_stdin;
-    siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
+    STARTUPINFO si;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.hStdOutput = hWritePipe_;
+    si.hStdError = hWritePipe_;
+    si.hStdInput = hReadPipe_stdin_;
+    si.wShowWindow = SW_HIDE;
+    ZeroMemory(&pi_, sizeof(pi_));
 
-    PROCESS_INFORMATION piProcInfo;
-    ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
+    // 转换命令为宽字符
+    std::wstring wcmd = StringToWide(command);
 
-    // Prepare environment block
-    std::string env_block;
-    {
-        std::lock_guard<std::mutex> lock(env_mutex_);
-        for (const auto& kv : environment_variables_) {
-            env_block += kv.first + "=" + kv.second + '\0';
-        }
-        env_block += '\0';
-    }
+    // CreateProcess需要可修改的字符串
+    std::vector<wchar_t> cmdBuffer(wcmd.begin(), wcmd.end());
+    cmdBuffer.push_back(L'\0');
 
-    // 处理工作目录 - 支持Unicode路径
-    const char* working_dir_ptr = nullptr;
-    std::wstring working_dir_wide;
+    // 使用Windows API设置环境变量
+    std::vector<std::pair<std::string, std::string>> originalEnvVars;
+    bool envVarsSet = false;
 
-    if (!working_dir.empty()) {
-        // 验证工作目录是否存在
-        if (!DirectoryExists(working_dir)) {
-            // AddLog("警告: 工作目录不存在，使用当前目录: " + working_dir);
-            working_dir = std::filesystem::current_path().string();
-        }
+    if (!environment_variables_.empty()) {
+        envVarsSet = true;
 
-        // 转换为绝对路径
-        working_dir = GetAbsolutePath(working_dir);
-        working_dir_ptr = working_dir.c_str();
+        for (const auto &pair: environment_variables_) {
+            if (!pair.first.empty()) {
+                // 保存原始值（如果存在）
+                DWORD bufferSize = GetEnvironmentVariableA(pair.first.c_str(), nullptr, 0);
+                if (bufferSize > 0) {
+                    // 变量存在，保存原始值
+                    std::vector<char> buffer(bufferSize);
+                    if (GetEnvironmentVariableA(pair.first.c_str(), buffer.data(), bufferSize) > 0) {
+                        originalEnvVars.emplace_back(pair.first, std::string(buffer.data()));
+                    } else {
+                        originalEnvVars.emplace_back(pair.first, "");
+                    }
+                } else {
+                    // 变量不存在，标记为新变量（使用空字符串表示原来不存在）
+                    originalEnvVars.emplace_back(pair.first, "");
+                }
 
-        // 如果路径包含非ASCII字符，需要使用CreateProcessW
-        bool hasNonAscii = false;
-        for (char c : working_dir) {
-            if (static_cast<unsigned char>(c) > 127) {
-                hasNonAscii = true;
-                break;
-            }
-        }
-
-        if (hasNonAscii) {
-            // 转换为宽字符用于CreateProcessW
-            int wideSize = MultiByteToWideChar(CP_UTF8, 0, working_dir.c_str(), -1, nullptr, 0);
-            if (wideSize > 0) {
-                working_dir_wide.resize(wideSize);
-                MultiByteToWideChar(CP_UTF8, 0, working_dir.c_str(), -1, &working_dir_wide[0], wideSize);
-            }
-        }
-    }
-
-    BOOL bSuccess = FALSE;
-
-    // 如果工作目录包含Unicode字符，使用CreateProcessW
-    if (!working_dir_wide.empty()) {
-        // 转换命令为宽字符
-        int cmdWideSize = MultiByteToWideChar(CP_UTF8, 0, command.c_str(), -1, nullptr, 0);
-        if (cmdWideSize > 0) {
-            std::wstring command_wide(cmdWideSize, L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, command.c_str(), -1, &command_wide[0], cmdWideSize);
-
-            // 转换环境变量为宽字符
-            std::wstring env_block_wide;
-            if (!env_block.empty()) {
-                int envWideSize = MultiByteToWideChar(CP_UTF8, 0, env_block.c_str(), static_cast<int>(env_block.size()), nullptr, 0);
-                if (envWideSize > 0) {
-                    env_block_wide.resize(envWideSize);
-                    MultiByteToWideChar(CP_UTF8, 0, env_block.c_str(), static_cast<int>(env_block.size()), &env_block_wide[0], envWideSize);
+                // 设置新的环境变量值
+                if (SetEnvironmentVariableA(pair.first.c_str(), pair.second.c_str())) {
+                    // AddLog("设置环境变量: " + pair.first + "=" + pair.second);
+                } else {
+                    AddLog("设置环境变量失败: " + pair.first + " (错误代码: " + std::to_string(GetLastError()) + ")");
                 }
             }
-
-            STARTUPINFOW siStartInfoW;
-            ZeroMemory(&siStartInfoW, sizeof(STARTUPINFOW));
-            siStartInfoW.cb = sizeof(STARTUPINFOW);
-            siStartInfoW.hStdError = hWriteTmp;
-            siStartInfoW.hStdOutput = hWriteTmp;
-            siStartInfoW.hStdInput = hReadTmp_stdin;
-            siStartInfoW.dwFlags |= STARTF_USESTDHANDLES;
-
-            bSuccess = CreateProcessW(
-                nullptr,
-                &command_wide[0],
-                nullptr,
-                nullptr,
-                TRUE,
-                CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
-                env_block_wide.empty() ? nullptr : (LPVOID)env_block_wide.data(),
-                working_dir_wide.c_str(),
-                &siStartInfoW,
-                &piProcInfo);
         }
+
+        // AddLog("环境变量设置完成，数量: " + std::to_string(environment_variables_.size()));
     } else {
-        // 使用ANSI版本
-        bSuccess = CreateProcessA(
-            nullptr,
-            const_cast<char*>(command.c_str()),
-            nullptr,
-            nullptr,
-            TRUE,
-            CREATE_NO_WINDOW,
-            env_block.empty() ? nullptr : static_cast<LPVOID>(env_block.data()),
-            working_dir_ptr,
-            &siStartInfo,
-            &piProcInfo);
+        AddLog("未设置自定义环境变量，使用默认环境 PWD:" + WideToString(working_dir));
     }
 
-    CloseHandle(hWriteTmp);
-    CloseHandle(hReadTmp_stdin);
+    BOOL result = CreateProcess(
+            nullptr,                    // lpApplicationName
+            cmdBuffer.data(),          // lpCommandLine
+            nullptr,                   // lpProcessAttributes
+            nullptr,                   // lpThreadAttributes
+            TRUE,                      // bInheritHandles
+            CREATE_NO_WINDOW,          // dwCreationFlags
+            nullptr,                   // lpEnvironment (使用nullptr让子进程继承当前环境)
+            working_dir.empty() ? nullptr : working_dir.data(),                   // lpCurrentDirectory
+            &si,                       // lpStartupInfo
+            &pi_                       // lpProcessInformation
+    );
 
-    if (!bSuccess) {
-        DWORD error = GetLastError();
-        CloseHandle(hReadTmp);
-        CloseHandle(hWriteTmp_stdin);
-        AddLog("启动进程失败，错误代码: " + std::to_string(error));
-
-        // 提供更详细的错误信息
-        switch (error) {
-            case ERROR_FILE_NOT_FOUND:
-                AddLog("错误: 找不到指定的文件或程序");
-                break;
-            case ERROR_PATH_NOT_FOUND:
-                AddLog("错误: 找不到指定的路径");
-                break;
-            case ERROR_ACCESS_DENIED:
-                AddLog("错误: 访问被拒绝，可能需要管理员权限");
-                break;
-            case ERROR_INVALID_PARAMETER:
-                AddLog("错误: 无效的参数");
-                break;
-            default:
-                AddLog("错误: 未知错误，请检查命令和路径是否正确");
-                break;
+    // 恢复原始环境变量
+    if (envVarsSet) {
+        for (const auto &pair: originalEnvVars) {
+            if (pair.second.empty()) {
+                // 原来不存在，删除变量
+                SetEnvironmentVariableA(pair.first.c_str(), nullptr);
+            } else {
+                // 恢复原始值
+                SetEnvironmentVariableA(pair.first.c_str(), pair.second.c_str());
+            }
         }
-        return;
     }
 
-    CloseProcessHandles();
+    if (result) {
+        AddLog("进程已启动: " + command + " PID: " + std::to_string(pi_.dwProcessId));
 
-    pi_ = piProcInfo;
-    hReadPipe_ = hReadTmp;
-    hWritePipe_stdin_ = hWriteTmp_stdin;
+        CloseHandle(hWritePipe_);
+        CloseHandle(hReadPipe_stdin_);
+        hWritePipe_ = nullptr;
+        hReadPipe_stdin_ = nullptr;
 
-    AddLog("进程已启动，PID: " + std::to_string(piProcInfo.dwProcessId));
-    if (!working_dir.empty()) {
-        AddLog("工作目录: " + working_dir);
+        output_thread_ = std::thread([this]() {
+            ReadOutput();
+        });
+    } else {
+        DWORD err = GetLastError();
+
+        // 获取详细的错误信息
+        LPWSTR messageBuffer = nullptr;
+        size_t size = FormatMessageW(
+                FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                nullptr, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                (LPWSTR) &messageBuffer, 0, nullptr);
+
+        std::string errorMsg = "CreateProcess 失败 (错误代码: " + std::to_string(err) + ")";
+        if (messageBuffer) {
+            std::wstring wErrorMsg(messageBuffer);
+            errorMsg += " - " + WideToString(wErrorMsg);
+            LocalFree(messageBuffer);
+        }
+
+        AddLog(errorMsg);
+
+        // 清理资源
+        CloseHandle(hReadPipe_);
+        CloseHandle(hWritePipe_);
+        CloseHandle(hReadPipe_stdin_);
+        CloseHandle(hWritePipe_stdin_);
+        hReadPipe_ = hWritePipe_ = hReadPipe_stdin_ = hWritePipe_stdin_ = nullptr;
     }
-
-    // Start output reading thread
-    output_thread_ = std::thread(&CLIProcess::ReadOutput, this);
-
 #else
     // Unix/Linux implementation
     int pipe_out[2];

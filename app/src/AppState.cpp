@@ -7,6 +7,7 @@ AppState::AppState() :
     show_main_window(true),
     auto_start(false),
     auto_scroll_logs(true),
+    enable_colored_logs(true),
     max_log_lines(1000),
     stop_timeout_ms(5000),
     use_stop_command(false),

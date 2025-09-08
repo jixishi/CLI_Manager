@@ -272,7 +272,12 @@ void Manager::RenderMenuBar() {
             RenderLayoutMenu();
             ImGui::EndMenu();
         }
-
+        if (ImGui::BeginMenu("主题")) {
+            if (ImGui::MenuItem("暗黑(Dark)")) { ImGui::StyleColorsDark(); }
+            if (ImGui::MenuItem("明亮(Light)")) { ImGui::StyleColorsLight(); }
+            if (ImGui::MenuItem("经典(Classic)")) { ImGui::StyleColorsClassic(); }
+            ImGui::EndMenu();
+        }
         ImGui::EndMenuBar();
     }
 }
@@ -994,11 +999,14 @@ void Manager::RenderLogPanel() {
 
 ImVec4 Manager::GetLogLevelColor(const std::string& log) {
     // 简单的日志级别颜色区分
-    if (log.find("[ERROR]") != std::string::npos || log.find("error") != std::string::npos) {
+    if (log.find("错误") != std::string::npos || log.find("[E]") != std::string::npos ||
+        log.find("[ERROR]") != std::string::npos || log.find("error") != std::string::npos) {
         return ImVec4(1.0f, 0.4f, 0.4f, 1.0f); // 红色
-    } else if (log.find("[WARN]") != std::string::npos || log.find("warning") != std::string::npos) {
+    } else if (log.find("警告") != std::string::npos || log.find("[W]") != std::string::npos ||
+               log.find("[WARN]") != std::string::npos || log.find("warning") != std::string::npos) {
         return ImVec4(1.0f, 1.0f, 0.4f, 1.0f); // 黄色
-    } else if (log.find("[INFO]") != std::string::npos || log.find("info") != std::string::npos) {
+    } else if (log.find("信息") != std::string::npos || log.find("[I]") != std::string::npos ||
+               log.find("[INFO]") != std::string::npos || log.find("info") != std::string::npos) {
         return ImVec4(0.4f, 1.0f, 0.4f, 1.0f); // 绿色
     }
     return ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // 默认白色

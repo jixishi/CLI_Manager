@@ -127,7 +127,7 @@ private:
     mutable std::mutex encoding_mutex_;
     OutputEncoding output_encoding_;
 
-    // 新增：工作目录相关
+    // 工作目录相关
     mutable std::mutex working_dir_mutex_;
     std::string working_directory_;
     bool use_auto_working_dir_;
