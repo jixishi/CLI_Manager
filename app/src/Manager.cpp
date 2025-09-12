@@ -111,6 +111,7 @@ bool Manager::Initialize() {
     m_app_state.LoadSettings();
     m_app_state.auto_start = IsAutoStartEnabled();
     m_app_state.ApplySettings();
+    m_app_state.SaveSettings();
 
 #ifdef _WIN32
     m_tray->UpdateWebUrl(StringToWide(m_app_state.web_url));
@@ -122,6 +123,8 @@ bool Manager::Initialize() {
     // 如果开启了开机自启动且有启动命令，则自动启动子进程
     if (m_app_state.auto_start && strlen(m_app_state.command_input) > 0) {
         m_app_state.cli_process.Start(m_app_state.command_input);
+        m_app_state.show_main_window = false;
+        HideMainWindow();
     }
     m_tray->UpdateStatus(m_app_state.cli_process.IsRunning() ? L"运行中" : L"已停止", m_app_state.cli_process.GetPid());
     m_initialized = true;
@@ -235,9 +238,11 @@ void Manager::RenderUI() {
 
     // 设置默认布局(仅在第一次运行时)
     SetupDefaultDockingLayout(m_dockspace_id);
+
     ImGuiWindowClass window_class;
     window_class.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoWindowMenuButton;
     ImGui::SetNextWindowClass(&window_class);
+
     RenderMainContent();
 
     ImGui::End();
@@ -541,7 +546,11 @@ void Manager::RenderSettingsMenu() {
         SetAutoStart(m_app_state.auto_start);
         m_app_state.settings_dirty = true;
     }
-
+    if (ImGui::MenuItem("自动工作路径", nullptr, m_app_state.auto_working_dir)) {
+        m_app_state.auto_working_dir = !m_app_state.auto_working_dir;
+        m_app_state.cli_process.SetAutoWorkingDir(m_app_state.auto_working_dir);
+        m_app_state.settings_dirty = true;
+    }
     ImGui::Separator();
     ImGui::Text("日志设置");
     if (ImGui::InputInt("最大日志行数", &m_app_state.max_log_lines, 100, 500)) {
@@ -732,7 +741,7 @@ void Manager::RenderOutputEncodingSettings() {
 
 void Manager::RenderControlPanel(float buttonWidth, float buttonHeight, float inputWidth) {
     // 启动命令输入区域
-    ImGui::SeparatorText("启动命令");
+    ImGui::SeparatorText("CLI程序");
 
     // 命令输入框和历史记录按钮
     ImGui::SetNextItemWidth(inputWidth);
@@ -749,7 +758,11 @@ void Manager::RenderControlPanel(float buttonWidth, float buttonHeight, float in
     if (show_command_history_) {
         RenderCommandHistory();
     }
-
+    ImGui::SeparatorText("工作路径(留空且开启自动路径为文件父路径、不然为管理器路径)");
+    if (ImGui::InputText("##工作路径", m_app_state.working_directory, IM_ARRAYSIZE(m_app_state.working_directory))) {
+        m_app_state.cli_process.SetWorkingDirectory(m_app_state.working_directory);
+        m_app_state.settings_dirty = true;
+    }
     ImGui::Spacing();
 
     // 控制按钮组
@@ -758,6 +771,11 @@ void Manager::RenderControlPanel(float buttonWidth, float buttonHeight, float in
         if (strlen(m_app_state.command_input) > 0) {
             m_app_state.cli_process.Start(m_app_state.command_input);
             m_app_state.AddCommandToHistory(m_app_state.command_input);
+            if (strlen(m_app_state.working_directory) > 0) {
+                m_app_state.cli_process.SetWorkingDirectory(m_app_state.working_directory);
+            }else {
+                strncpy_s(m_app_state.working_directory,m_app_state.cli_process.GetWorkingDirectory().c_str(),sizeof(m_app_state.working_directory)-1);
+            }
             m_tray->UpdateStatus(m_app_state.cli_process.IsRunning() ? L"运行中" : L"已停止",
                                  m_app_state.cli_process.GetPid());
         }
@@ -1133,7 +1151,6 @@ void Manager::ContentScaleCallback(GLFWwindow *window, float xscale, float yscal
     }
 }
 
-
 #ifdef USE_WIN32_BACKEND
 bool Manager::InitializeWin32() {
     m_wc = {};
@@ -1477,7 +1494,6 @@ void Manager::ReloadFonts() const {
     // OpenGL字体纹理重建会由ImGui自动处理
 #endif
 }
-
 
 #ifdef __APPLE__
 // macOS 特定的辅助函数声明

@@ -44,8 +44,9 @@ public:
     void SetStopCommand(const std::string& command, int timeout_ms = 5000);
     void SetEnvironmentVariables(const std::map<std::string, std::string>& env_vars);
     void SetOutputEncoding(OutputEncoding encoding);
+    void SetAutoWorkingDir(bool auto_dir);
 
-    // 新增：工作目录设置
+    // 工作目录设置
     void SetWorkingDirectory(const std::string& working_dir);
     std::string GetWorkingDirectory() const;
 

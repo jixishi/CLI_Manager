@@ -26,38 +26,40 @@ CLIProcess::CLIProcess() {
     max_log_lines_ = 1000;
     stop_timeout_ms_ = 5000;
     output_encoding_ = OutputEncoding::AUTO_DETECT;
-    use_auto_working_dir_ = false; // 自动工作目录
+    use_auto_working_dir_ = true; // 自动工作目录
 }
 
 CLIProcess::~CLIProcess() {
     Stop();
     CleanupResources();
 }
-
-// 新增：设置工作目录
+void CLIProcess::SetAutoWorkingDir(const bool auto_dir) {
+    use_auto_working_dir_ = auto_dir;
+}
+// 设置工作目录
 void CLIProcess::SetWorkingDirectory(const std::string& working_dir) {
     std::lock_guard<std::mutex> lock(working_dir_mutex_);
     if (working_dir.empty()) {
-        use_auto_working_dir_ = true;
+        // use_auto_working_dir_ = true;
         working_directory_.clear();
     } else {
         if (DirectoryExists(working_dir)) {
             working_directory_ = GetAbsolutePath(working_dir);
             use_auto_working_dir_ = false;
-            AddLog("工作目录已设置为: " + working_directory_);
+            // AddLog("工作目录已设置为: " + working_directory_);
         } else {
             AddLog("警告: 指定的工作目录不存在: " + working_dir);
         }
     }
 }
 
-// 新增：获取当前工作目录设置
+// 获取当前工作目录设置
 std::string CLIProcess::GetWorkingDirectory() const {
     std::lock_guard<std::mutex> lock(working_dir_mutex_);
     return working_directory_;
 }
 
-// 新增：从命令中提取目录路径
+// 从命令中提取目录路径
 std::string CLIProcess::ExtractDirectoryFromCommand(const std::string& command) {
     if (command.empty()) return "";
 
@@ -470,7 +472,7 @@ void CLIProcess::Start(const std::string& command) {
 
         // AddLog("环境变量设置完成，数量: " + std::to_string(environment_variables_.size()));
     } else {
-        AddLog("未设置自定义环境变量，使用默认环境 PWD:" + WideToString(working_dir));
+        // AddLog("未设置自定义环境变量，使用默认环境 PWD:" + WideToString(working_dir));
     }
 
     BOOL result = CreateProcess(

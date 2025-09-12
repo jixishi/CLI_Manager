@@ -32,12 +32,22 @@ void SetAutoStart(bool enable) {
     WCHAR exePath[MAX_PATH];
     GetModuleFileName(NULL, exePath, MAX_PATH);
 
+    // 计算路径的简单哈希值
+    size_t hash = 0;
+    for (size_t i = 0; i < wcslen(exePath); i++) {
+        hash = (hash * 31) + exePath[i];
+    }
+
+    // 创建包含哈希的键名
+    WCHAR keyName[32];
+    swprintf(keyName, 32, L"CLIManager_%08X", static_cast<unsigned int>(hash));
+
     if (enable) {
-        RegSetValueEx(hKey, L"CLIManager", 0, REG_SZ,
+        RegSetValueEx(hKey, keyName, 0, REG_SZ,
             (BYTE*)exePath, (wcslen(exePath) + 1) * sizeof(WCHAR));
     }
     else {
-        RegDeleteValue(hKey, L"CLIManager");
+        RegDeleteValue(hKey, keyName);
     }
     RegCloseKey(hKey);
 }
@@ -49,8 +59,21 @@ bool IsAutoStartEnabled() {
     if (RegOpenKeyEx(HKEY_CURRENT_USER, path, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
         return false;
 
+    WCHAR exePath[MAX_PATH];
+    GetModuleFileName(NULL, exePath, MAX_PATH);
+
+    // 计算相同的哈希值
+    size_t hash = 0;
+    for (size_t i = 0; i < wcslen(exePath); i++) {
+        hash = (hash * 31) + exePath[i];
+    }
+
+    // 创建相同的键名用于查询
+    WCHAR keyName[32];
+    swprintf(keyName, 32, L"CLIManager_%08X", static_cast<unsigned int>(hash));
+
     DWORD type, size = 0;
-    bool exists = (RegQueryValueEx(hKey, L"CLIManager", NULL, &type, NULL, &size) == ERROR_SUCCESS);
+    bool exists = (RegQueryValueEx(hKey, keyName, NULL, &type, NULL, &size) == ERROR_SUCCESS);
 
     RegCloseKey(hKey);
     return exists;
