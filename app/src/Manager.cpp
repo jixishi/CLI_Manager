@@ -6,6 +6,7 @@
 
 
 #include "imgui_internal.h"
+#include "resource.h"
 #include "Units.h"
 
 Manager::Manager() = default;
@@ -126,6 +127,7 @@ bool Manager::Initialize() {
         m_app_state.cli_process.Start(m_app_state.command_input);
         m_app_state.show_main_window = false;
         HideMainWindow();
+        m_tray->ShowNotification(L"CLI自启动",StringToWide(m_app_state.command_input) + L"\n当前状态:" + (m_app_state.cli_process.IsRunning() ? L"运行中" : L"已停止"));
     }
     m_tray->UpdateStatus(m_app_state.cli_process.IsRunning() ? L"运行中" : L"已停止", m_app_state.cli_process.GetPid());
     m_initialized = true;
@@ -487,9 +489,11 @@ void Manager::RenderStatusMessages() {
         }
         ImGui::End();
 
+
         m_save_success_timer -= ImGui::GetIO().DeltaTime;
         if (m_save_success_timer <= 0.0f) {
             m_show_save_success = false;
+            m_tray->ShowNotification(L"CLI_Manager",L"当前布局保存成功!");
         }
     }
 
@@ -503,13 +507,14 @@ void Manager::RenderStatusMessages() {
                          ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                          ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
                          ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "布局已加载");
+
         }
         ImGui::End();
 
         m_load_success_timer -= ImGui::GetIO().DeltaTime;
         if (m_load_success_timer <= 0.0f) {
             m_show_load_success = false;
+            ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "布局已加载");
         }
     }
 
@@ -529,6 +534,7 @@ void Manager::RenderStatusMessages() {
         m_theme_save_success_timer -= ImGui::GetIO().DeltaTime;
         if (m_theme_save_success_timer <= 0.0f) {
             m_show_theme_save_success = false;
+            m_tray->ShowNotification(L"CLI_Manager",L"当前主题保存成功!");
         }
     }
 
@@ -836,6 +842,7 @@ void Manager::RenderControlPanel(float buttonWidth, float buttonHeight, float in
             m_app_state.AddCommandToHistory(m_app_state.command_input);
             m_tray->UpdateStatus(m_app_state.cli_process.IsRunning() ? L"运行中" : L"已停止",
                                  m_app_state.cli_process.GetPid());
+            m_tray->ShowNotification(L"CLI_Manager",m_app_state.cli_process.IsRunning() ? L"重启成功!" : L"重启失败!");
         }
     }
 
@@ -868,7 +875,7 @@ void Manager::RenderCommandPanel(float buttonWidth, float inputWidth) {
 
     // 显示发送状态
     if (!m_app_state.cli_process.IsRunning()) {
-        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "提示: 程序未运行，无法发送命令");
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 0.6f), "提示: 程序未运行，无法发送命令");
     }
 }
 
@@ -1096,7 +1103,12 @@ bool Manager::InitializeTray() {
         return false;
     }
 
-    HICON trayIcon = LoadIcon(NULL, IDI_APPLICATION);
+    // 加载自定义图标
+    HICON trayIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_ICON1));
+    if (!trayIcon) {
+        // 如果加载失败，使用默认图标
+        trayIcon = LoadIcon(NULL, IDI_APPLICATION);
+    }
     m_tray = std::make_unique<TrayIcon>(m_tray_hwnd, trayIcon);
 
     // 设置托盘窗口的用户数据，指向TrayIcon实例

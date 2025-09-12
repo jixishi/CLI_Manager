@@ -77,16 +77,16 @@ void TrayIcon::SetExitCallback(const ExitCallback &callback) {
 }
 
 #ifdef _WIN32
-void TrayIcon::ShowWindowsNotification(const std::wstring &title, const std::wstring &message) {
+void TrayIcon::ShowNotification(const std::wstring &title, const std::wstring &message, NotifyAction notify) const {
     NOTIFYICONDATA nid = m_nid;
     nid.uFlags |= NIF_INFO;
     wcsncpy_s(nid.szInfoTitle, title.c_str(), _TRUNCATE);
     wcsncpy_s(nid.szInfo, message.c_str(), _TRUNCATE);
-    nid.dwInfoFlags = NIIF_INFO; // 信息图标，可选 NIIF_WARNING, NIIF_ERROR
+    nid.dwInfoFlags = static_cast<DWORD>(notify); // 信息图标，可选 NIIF_WARNING, NIIF_ERROR
     Shell_NotifyIcon(NIM_MODIFY, &nid);
 }
 #elif __APPLE__
-void TrayIcon::ShowMacNotification(const std::string &title, const std::string &message)
+void TrayIcon::ShowNotification(const std::string &title, const std::string &message)
 {
     // 通过 AppleScript 或 Objective-C 桥接
     std::string script = "display notification \"" + message + "\" with title \"" + title + "\"";
@@ -94,7 +94,7 @@ void TrayIcon::ShowMacNotification(const std::string &title, const std::string &
     system(cmd.c_str());
 }
 #else
-void TrayIcon::ShowLinuxNotification(const std::string &title, const std::string &message)
+void TrayIcon::ShowNotification(const std::string &title, const std::string &message)
 {
     // 使用 notify-send 命令
     std::string cmd = "notify-send \"" + title + "\" \"" + message + "\"";

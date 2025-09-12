@@ -503,7 +503,6 @@ void CLIProcess::Start(const std::string& command) {
 
     if (result) {
         AddLog("进程已启动: " + command + " PID: " + std::to_string(pi_.dwProcessId));
-
         CloseHandle(hWritePipe_);
         CloseHandle(hReadPipe_stdin_);
         hWritePipe_ = nullptr;

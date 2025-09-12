@@ -35,12 +35,18 @@ public:
     // 设置回调函数
     void SetShowWindowCallback(const ShowWindowCallback &callback);
     void SetExitCallback(const ExitCallback &callback);
+    enum class NotifyAction {
+        Notify_NONE,
+        Notify_INFO,
+        Notify_WARNING,
+        Notify_ERROR,
+        Notify_USER
+    };
+
 #ifdef _WIN32
-    void ShowWindowsNotification(const std::wstring& title, const std::wstring& message);
-#elif __APPLE__
-    void ShowMacNotification(const std::string& title, const std::string& message);
+    void ShowNotification(const std::wstring &title, const std::wstring &message, NotifyAction notify= NotifyAction::Notify_INFO) const;
 #else
-    void ShowLinuxNotification(const std::string& title, const std::string& message);
+    void ShowNotification(const std::string& title, const std::string& message, NotifyAction notify= NotifyAction::Notify_INFO);
 #endif
 private:
     void CreateMenu();

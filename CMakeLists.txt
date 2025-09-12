@@ -31,6 +31,7 @@ file(GLOB SRC
         ${IMGUI_DIR}/misc/cpp/*.cpp
         app/src/*.*
         main.cpp
+
 )
 
 
@@ -63,7 +64,7 @@ if(IMGUI_BACKENDS STREQUAL "win32_dx11")
 endif()
 
 # generate binary
-add_executable(${PROJECT_NAME} WIN32 ${SRC} ${PLATFORM_SRC})
+add_executable(${PROJECT_NAME} WIN32 ${SRC} ${PLATFORM_SRC} logo.rc)
 
 if(IMGUI_BACKENDS STREQUAL "glfw_opengl")
     target_link_libraries(${PROJECT_NAME}
