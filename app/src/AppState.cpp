@@ -160,6 +160,82 @@ void AppState::DeserializeOutputEncoding(const std::string& serialized) {
     }
 }
 
+std::string AppState::SerializeLogColors() const {
+    std::ostringstream oss;
+
+    // 按顺序保存每个颜色的RGBA值
+    oss << log_colors.error_color.x << ","
+        << log_colors.error_color.y << ","
+        << log_colors.error_color.z << ","
+        << log_colors.error_color.w << "|";
+
+    oss << log_colors.warn_color.x << ","
+        << log_colors.warn_color.y << ","
+        << log_colors.warn_color.z << ","
+        << log_colors.warn_color.w << "|";
+
+    oss << log_colors.info_color.x << ","
+        << log_colors.info_color.y << ","
+        << log_colors.info_color.z << ","
+        << log_colors.info_color.w << "|";
+
+    oss << log_colors.debug_color.x << ","
+        << log_colors.debug_color.y << ","
+        << log_colors.debug_color.z << ","
+        << log_colors.debug_color.w << "|";
+
+    oss << log_colors.trace_color.x << ","
+        << log_colors.trace_color.y << ","
+        << log_colors.trace_color.z << ","
+        << log_colors.trace_color.w;
+
+    return oss.str();
+}
+
+// 新增：反序列化日志颜色
+void AppState::DeserializeLogColors(const std::string& serialized) {
+    if (serialized.empty()) {
+        log_colors.ResetToDefaults();
+        return;
+    }
+
+    std::istringstream iss(serialized);
+    std::string colorStr;
+    int colorIndex = 0;
+
+    while (std::getline(iss, colorStr, '|') && colorIndex < 5) {
+        std::istringstream colorIss(colorStr);
+        std::string component;
+        float rgba[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        int i = 0;
+
+        while (std::getline(colorIss, component, ',') && i < 4) {
+            try {
+                rgba[i++] = std::stof(component);
+            } catch (const std::exception&) {
+                // 如果解析失败，使用默认值
+            }
+        }
+
+        ImVec4 color(rgba[0], rgba[1], rgba[2], rgba[3]);
+
+        switch (colorIndex) {
+            case 0: log_colors.error_color = color; break;
+            case 1: log_colors.warn_color = color; break;
+            case 2: log_colors.info_color = color; break;
+            case 3: log_colors.debug_color = color; break;
+            case 4: log_colors.trace_color = color; break;
+        }
+
+        colorIndex++;
+    }
+
+    // 如果没有足够的颜色数据，重置为默认值
+    if (colorIndex < 5) {
+        log_colors.ResetToDefaults();
+    }
+}
+
 void AppState::LoadSettings() {
     std::ifstream file("climanager_settings.ini");
     if (!file.is_open()) return;
@@ -234,6 +310,14 @@ void AppState::LoadSettings() {
                 else if (key == "MaxCommandHistory") {
                     max_command_history = std::stoi(value);
                     max_command_history = std::max(5, std::min(max_command_history, 100));
+                }else if (key == "UseCustomLogColors") {
+                    use_custom_log_colors = (value == "1");
+                }
+                else if (key == "UseAnsiColors") {
+                    use_ansi_colors = (value == "1");
+                }
+                else if (key == "LogColors") {
+                    DeserializeLogColors(value);
                 }
             }
         }
@@ -271,6 +355,9 @@ void AppState::SaveSettings() {
     file << "CommandHistory=" << SerializeCommandHistory() << "\n";
     file << "MaxCommandHistory=" << max_command_history << "\n";
 
+    file << "UseCustomLogColors=" << (use_custom_log_colors ? "1" : "0") << "\n";
+    file << "UseAnsiColors=" << (use_ansi_colors ? "1" : "0") << "\n";
+    file << "LogColors=" << SerializeLogColors() << "\n";
     file.close();
 
     settings_dirty = false;

@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <sstream>
 
-std::wstring StringToWide(const std::string& str) {
+std::wstring StringToWide(const std::string &str) {
     if (str.empty()) return L"";
     int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, nullptr, 0);
     std::wstring wstr(size, 0);
@@ -14,7 +14,7 @@ std::wstring StringToWide(const std::string& str) {
     return wstr;
 }
 
-std::string WideToString(const std::wstring& wstr) {
+std::string WideToString(const std::wstring &wstr) {
     if (wstr.empty()) return "";
     int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
     std::string str(size, 0);
@@ -44,9 +44,8 @@ void SetAutoStart(bool enable) {
 
     if (enable) {
         RegSetValueEx(hKey, keyName, 0, REG_SZ,
-            (BYTE*)exePath, (wcslen(exePath) + 1) * sizeof(WCHAR));
-    }
-    else {
+                      (BYTE *) exePath, (wcslen(exePath) + 1) * sizeof(WCHAR));
+    } else {
         RegDeleteValue(hKey, keyName);
     }
     RegCloseKey(hKey);
@@ -79,6 +78,7 @@ bool IsAutoStartEnabled() {
     return exists;
 }
 
+// 日志颜色处理函数
 ImVec4 GetLogLevelColor(const std::string &log) {
     // 简单的日志级别颜色区分
     if (log.find("错误") != std::string::npos || log.find("[E]") != std::string::npos ||
@@ -90,11 +90,17 @@ ImVec4 GetLogLevelColor(const std::string &log) {
     } else if (log.find("信息") != std::string::npos || log.find("[I]") != std::string::npos ||
                log.find("[INFO]") != std::string::npos || log.find("info") != std::string::npos) {
         return ImVec4(0.4f, 1.0f, 0.4f, 1.0f); // 绿色
+    } else if (log.find("调试") != std::string::npos || log.find("[D]") != std::string::npos ||
+               log.find("[DEBUG]") != std::string::npos || log.find("debug") != std::string::npos) {
+        return ImVec4(0.6f, 0.6f, 1.0f, 1.0f); // 蓝色
+    } else if (log.find("跟踪") != std::string::npos || log.find("[T]") != std::string::npos ||
+               log.find("[TRACE]") != std::string::npos || log.find("trace") != std::string::npos) {
+        return ImVec4(0.8f, 0.8f, 0.8f, 1.0f); // 灰色
     }
     return ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // 默认白色
 }
 
-
+// ANSI颜色处理增强版本
 void RenderColoredLogLine(const std::string &log) {
     auto segments = ParseAnsiColorCodes(log);
 
@@ -197,18 +203,18 @@ ParseAnsiColorCode(const std::string &code, const ImVec4 &currentColor, bool cur
 
     for (int colorCode: codes) {
         switch (colorCode) {
-            case 0:  // 重置
+            case 0: // 重置
                 newColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
                 newBold = false;
                 break;
-            case 1:  // 粗体/亮色
+            case 1: // 粗体/亮色
                 newBold = true;
                 break;
             case 22: // 正常强度
                 newBold = false;
                 break;
 
-                // 前景色 (30-37)
+            // 前景色 (30-37)
             case 30:
                 newColor = GetAnsiColor(0, newBold);
                 break; // 黑色
@@ -237,13 +243,13 @@ ParseAnsiColorCode(const std::string &code, const ImVec4 &currentColor, bool cur
                 newColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
                 break; // 默认前景色
 
-                // 亮色前景色 (90-97)
+            // 亮色前景色 (90-97)
             case 90:
                 newColor = GetAnsiColor(8, false);
-                break;  // 亮黑色(灰色)
+                break; // 亮黑色(灰色)
             case 91:
                 newColor = GetAnsiColor(9, false);
-                break;  // 亮红色
+                break; // 亮红色
             case 92:
                 newColor = GetAnsiColor(10, false);
                 break; // 亮绿色
@@ -263,10 +269,49 @@ ParseAnsiColorCode(const std::string &code, const ImVec4 &currentColor, bool cur
                 newColor = GetAnsiColor(15, false);
                 break; // 亮白色
 
-                // 背景色暂时忽略 (40-47, 100-107)
+            // 增加对背景色的支持 (40-47, 100-107)
+            case 40:
+            case 41:
+            case 42:
+            case 43:
+            case 44:
+            case 45:
+            case 46:
+            case 47:
+            case 100:
+            case 101:
+            case 102:
+            case 103:
+            case 104:
+            case 105:
+            case 106:
+            case 107:
+                // 背景色暂时不处理，因为ImGui不容易实现背景色
+                break;
+
             default:
                 // 处理256色和RGB色彩(38;5;n 和 38;2;r;g;b)
-                // 这里可以根据需要扩展
+                if (colorCode == 38 || colorCode == 48) {
+                    // 38=前景，48=背景
+                    // 检查是否是256色模式或RGB模式
+                    if (codes.size() > 1) {
+                        if (codes[1] == 5 && codes.size() > 2) {
+                            // 256色模式
+                            // 暂时不实现所有256色，仅处理基本的16色
+                            int colorIndex = codes[2];
+                            if (colorIndex >= 0 && colorIndex < 16) {
+                                newColor = GetAnsiColor(colorIndex, newBold);
+                            }
+                        } else if (codes[1] == 2 && codes.size() > 4) {
+                            // RGB模式
+                            // 处理RGB值
+                            float r = static_cast<float>(codes[2]) / 255.0f;
+                            float g = static_cast<float>(codes[3]) / 255.0f;
+                            float b = static_cast<float>(codes[4]) / 255.0f;
+                            newColor = ImVec4(r, g, b, 1.0f);
+                        }
+                    }
+                }
                 break;
         }
     }
@@ -277,25 +322,25 @@ ParseAnsiColorCode(const std::string &code, const ImVec4 &currentColor, bool cur
 ImVec4 GetAnsiColor(int colorIndex, bool bright) {
     // ANSI标准颜色表
     static const ImVec4 ansiColors[16] = {
-            // 标准颜色 (0-7)
-            ImVec4(0.0f, 0.0f, 0.0f, 1.0f),     // 0: 黑色
-            ImVec4(0.8f, 0.0f, 0.0f, 1.0f),     // 1: 红色
-            ImVec4(0.0f, 0.8f, 0.0f, 1.0f),     // 2: 绿色
-            ImVec4(0.8f, 0.8f, 0.0f, 1.0f),     // 3: 黄色
-            ImVec4(0.0f, 0.0f, 0.8f, 1.0f),     // 4: 蓝色
-            ImVec4(0.8f, 0.0f, 0.8f, 1.0f),     // 5: 洋红
-            ImVec4(0.0f, 0.8f, 0.8f, 1.0f),     // 6: 青色
-            ImVec4(0.8f, 0.8f, 0.8f, 1.0f),     // 7: 白色
+        // 标准颜色 (0-7)
+        ImVec4(0.0f, 0.0f, 0.0f, 1.0f), // 0: 黑色
+        ImVec4(0.8f, 0.0f, 0.0f, 1.0f), // 1: 红色
+        ImVec4(0.0f, 0.8f, 0.0f, 1.0f), // 2: 绿色
+        ImVec4(0.8f, 0.8f, 0.0f, 1.0f), // 3: 黄色
+        ImVec4(0.0f, 0.0f, 0.8f, 1.0f), // 4: 蓝色
+        ImVec4(0.8f, 0.0f, 0.8f, 1.0f), // 5: 洋红
+        ImVec4(0.0f, 0.8f, 0.8f, 1.0f), // 6: 青色
+        ImVec4(0.8f, 0.8f, 0.8f, 1.0f), // 7: 白色
 
-            // 亮色 (8-15)
-            ImVec4(0.5f, 0.5f, 0.5f, 1.0f),     // 8: 亮黑色(灰色)
-            ImVec4(1.0f, 0.0f, 0.0f, 1.0f),     // 9: 亮红色
-            ImVec4(0.0f, 1.0f, 0.0f, 1.0f),     // 10: 亮绿色
-            ImVec4(1.0f, 1.0f, 0.0f, 1.0f),     // 11: 亮黄色
-            ImVec4(0.0f, 0.0f, 1.0f, 1.0f),     // 12: 亮蓝色
-            ImVec4(1.0f, 0.0f, 1.0f, 1.0f),     // 13: 亮洋红
-            ImVec4(0.0f, 1.0f, 1.0f, 1.0f),     // 14: 亮青色
-            ImVec4(1.0f, 1.0f, 1.0f, 1.0f),     // 15: 亮白色
+        // 亮色 (8-15)
+        ImVec4(0.5f, 0.5f, 0.5f, 1.0f), // 8: 亮黑色(灰色)
+        ImVec4(1.0f, 0.0f, 0.0f, 1.0f), // 9: 亮红色
+        ImVec4(0.0f, 1.0f, 0.0f, 1.0f), // 10: 亮绿色
+        ImVec4(1.0f, 1.0f, 0.0f, 1.0f), // 11: 亮黄色
+        ImVec4(0.0f, 0.0f, 1.0f, 1.0f), // 12: 亮蓝色
+        ImVec4(1.0f, 0.0f, 1.0f, 1.0f), // 13: 亮洋红
+        ImVec4(0.0f, 1.0f, 1.0f, 1.0f), // 14: 亮青色
+        ImVec4(1.0f, 1.0f, 1.0f, 1.0f), // 15: 亮白色
     };
 
     if (colorIndex >= 0 && colorIndex < 16) {
@@ -313,3 +358,4 @@ ImVec4 GetAnsiColor(int colorIndex, bool bright) {
 
     return ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // 默认白色
 }
+

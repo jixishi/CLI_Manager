@@ -5,7 +5,26 @@
 #include <string>
 #include <map>
 #include <vector>
-#include <imgui.h>
+
+#include "imgui.h"
+
+
+struct LogColors {
+    ImVec4 error_color = ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
+    ImVec4 warn_color = ImVec4(1.0f, 1.0f, 0.4f, 1.0f);
+    ImVec4 info_color = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);
+    ImVec4 debug_color = ImVec4(0.6f, 0.6f, 1.0f, 1.0f);
+    ImVec4 trace_color = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+
+    void ResetToDefaults() {
+        error_color = ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
+        warn_color = ImVec4(1.0f, 1.0f, 0.4f, 1.0f);
+        info_color = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);
+        debug_color = ImVec4(0.6f, 0.6f, 1.0f, 1.0f);
+        trace_color = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+    }
+};
+
 
 class AppState {
 public:
@@ -50,7 +69,11 @@ public:
     std::vector<std::string> command_history;
     int max_command_history;
 
+    LogColors log_colors;
+    bool use_custom_log_colors = false;
+    bool use_ansi_colors = true;
     bool settings_dirty;
+
 
 private:
     // 环境变量序列化辅助函数
@@ -60,8 +83,11 @@ private:
     // 编码序列化辅助函数
     std::string SerializeOutputEncoding() const;
     void DeserializeOutputEncoding(const std::string& serialized);
+    // 日志颜色序列化辅助
+    std::string SerializeLogColors() const;
+    void DeserializeLogColors(const std::string &serialized);
 
-    // 新增：命令历史记录序列化辅助函数
+    // 命令历史记录序列化辅助函数
     std::string SerializeCommandHistory() const;
     void DeserializeCommandHistory(const std::string& serialized);
 };

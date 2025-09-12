@@ -28,10 +28,10 @@ bool Manager::Initialize() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // Enable Docking
-//    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;       // Enable Multi-Viewport / Platform Windows
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // Enable Docking
+    //    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;       // Enable Multi-Viewport / Platform Windows
     io.ConfigViewportsNoAutoMerge = true;
     io.IniFilename = "imgui.ini";
 
@@ -67,10 +67,10 @@ bool Manager::Initialize() {
     // 加载字体
 #ifdef _WIN32
     ImFont *font = io.Fonts->AddFontFromFileTTF(
-            "C:/Windows/Fonts/msyh.ttc",
-            16.0f * m_dpi_scale,
-            nullptr,
-            io.Fonts->GetGlyphRangesChineseFull()
+        "C:/Windows/Fonts/msyh.ttc",
+        16.0f * m_dpi_scale,
+        nullptr,
+        io.Fonts->GetGlyphRangesChineseFull()
     );
 #elif __APPLE__
     // macOS 中文字体路径
@@ -113,6 +113,7 @@ bool Manager::Initialize() {
     m_app_state.ApplySettings();
     m_app_state.SaveSettings();
 
+    LoadSavedTheme();
 #ifdef _WIN32
     m_tray->UpdateWebUrl(StringToWide(m_app_state.web_url));
 
@@ -214,7 +215,7 @@ void Manager::RenderUI() {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
         window_flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
-                        ImGuiWindowFlags_NoMove;
+                ImGuiWindowFlags_NoMove;
         window_flags |= ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
     } else {
         dockspace_flags &= ~ImGuiDockNodeFlags_PassthruCentralNode;
@@ -226,7 +227,7 @@ void Manager::RenderUI() {
     if (!m_padding)
         ImGui::PopStyleVar();
     if (m_fullscreen)
-        ImGui::PopStyleVar(2);    // Submit the DockSpace
+        ImGui::PopStyleVar(2); // Submit the DockSpace
     ImGui::Begin("CLI程序管理工具", &m_app_state.show_main_window,
                  window_flags);
 
@@ -302,9 +303,10 @@ void Manager::RenderMenuBar() {
 
         // 添加主题菜单
         if (ImGui::BeginMenu("主题")) {
-            if (ImGui::MenuItem("暗黑(Dark)")) { ImGui::StyleColorsDark(); }
-            if (ImGui::MenuItem("明亮(Light)")) { ImGui::StyleColorsLight(); }
-            if (ImGui::MenuItem("经典(Classic)")) { ImGui::StyleColorsClassic(); }
+            // if (ImGui::MenuItem("暗黑(Dark)")) { ImGui::StyleColorsDark(); }
+            // if (ImGui::MenuItem("明亮(Light)")) { ImGui::StyleColorsLight(); }
+            // if (ImGui::MenuItem("经典(Classic)")) { ImGui::StyleColorsClassic(); }
+            RenderColorThemeSettings();
             ImGui::EndMenu();
         }
 
@@ -313,7 +315,7 @@ void Manager::RenderMenuBar() {
             ImGui::MenuItem("填充(Padding)", nullptr, &m_padding);
             ImGui::Separator();
             if (ImGui::MenuItem("标志：不分割(Flag: NoSplit)", "", (dockspace_flags & ImGuiDockNodeFlags_NoSplit) !=
-                                                                  0)) { dockspace_flags ^= ImGuiDockNodeFlags_NoSplit; }
+                                                             0)) { dockspace_flags ^= ImGuiDockNodeFlags_NoSplit; }
             if (ImGui::MenuItem("标志：不调整大小(Flag: NoResize)", "",
                                 (dockspace_flags & ImGuiDockNodeFlags_NoResize) !=
                                 0)) { dockspace_flags ^= ImGuiDockNodeFlags_NoResize; }
@@ -510,6 +512,45 @@ void Manager::RenderStatusMessages() {
             m_show_load_success = false;
         }
     }
+
+    if (m_show_theme_save_success) {
+        ImGui::SetNextWindowPos(ImVec2(ImGui::GetMainViewport()->Size.x * 0.5f, 50), ImGuiCond_Always,
+                                ImVec2(0.5f, 0.0f));
+        ImGui::SetNextWindowBgAlpha(0.8f);
+
+        if (ImGui::Begin("ThemeSaveSuccess", nullptr,
+                         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "主题已保存");
+        }
+        ImGui::End();
+
+        m_theme_save_success_timer -= ImGui::GetIO().DeltaTime;
+        if (m_theme_save_success_timer <= 0.0f) {
+            m_show_theme_save_success = false;
+        }
+    }
+
+    // 渲染主题加载成功提示
+    if (m_show_theme_load_success) {
+        ImGui::SetNextWindowPos(ImVec2(ImGui::GetMainViewport()->Size.x * 0.5f, 50), ImGuiCond_Always,
+                                ImVec2(0.5f, 0.0f));
+        ImGui::SetNextWindowBgAlpha(0.8f);
+
+        if (ImGui::Begin("ThemeLoadSuccess", nullptr,
+                         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "主题已加载");
+        }
+        ImGui::End();
+
+        m_theme_load_success_timer -= ImGui::GetIO().DeltaTime;
+        if (m_theme_load_success_timer <= 0.0f) {
+            m_show_theme_load_success = false;
+        }
+    }
 }
 
 void Manager::RenderMainContent() {
@@ -585,6 +626,7 @@ void Manager::RenderSettingsMenu() {
     RenderStopCommandSettings();
     RenderEnvironmentVariablesSettings();
     RenderOutputEncodingSettings();
+
 }
 
 void Manager::RenderStopCommandSettings() {
@@ -690,7 +732,7 @@ void Manager::RenderEnvironmentVariablesSettings() {
 
         ImGui::Spacing();
         ImGui::TextWrapped(
-                "说明：启用后，CLI程序将使用这些自定义环境变量。这些变量会与系统环境变量合并，同名变量会被覆盖。");
+            "说明：启用后，CLI程序将使用这些自定义环境变量。这些变量会与系统环境变量合并，同名变量会被覆盖。");
 
         ImGui::Unindent();
     } else {
@@ -773,8 +815,9 @@ void Manager::RenderControlPanel(float buttonWidth, float buttonHeight, float in
             m_app_state.AddCommandToHistory(m_app_state.command_input);
             if (strlen(m_app_state.working_directory) > 0) {
                 m_app_state.cli_process.SetWorkingDirectory(m_app_state.working_directory);
-            }else {
-                strncpy_s(m_app_state.working_directory,m_app_state.cli_process.GetWorkingDirectory().c_str(),sizeof(m_app_state.working_directory)-1);
+            } else {
+                strncpy_s(m_app_state.working_directory, m_app_state.cli_process.GetWorkingDirectory().c_str(),
+                          sizeof(m_app_state.working_directory) - 1);
             }
             m_tray->UpdateStatus(m_app_state.cli_process.IsRunning() ? L"运行中" : L"已停止",
                                  m_app_state.cli_process.GetPid());
@@ -800,9 +843,9 @@ void Manager::RenderControlPanel(float buttonWidth, float buttonHeight, float in
 
     // 状态显示
     ImGui::SeparatorText("运行状态");
-    ImVec4 statusColor = m_app_state.cli_process.IsRunning() ?
-                         ImVec4(0.0f, 1.0f, 0.0f, 1.0f) :
-                         ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
+    ImVec4 statusColor = m_app_state.cli_process.IsRunning()
+                             ? ImVec4(0.0f, 1.0f, 0.0f, 1.0f)
+                             : ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
     ImGui::TextColored(statusColor, "状态: %s",
                        m_app_state.cli_process.IsRunning() ? "运行中" : "已停止");
 }
@@ -875,11 +918,17 @@ void Manager::RenderLogPanel() {
                 const std::string &log = logs[i];
 
                 if (m_app_state.enable_colored_logs) {
-                    RenderColoredLogLine(log);
+                    if (m_app_state.use_ansi_colors) {
+                        // 使用ANSI颜色转义序列解析
+                        RenderColoredLogLine(log);
+                    } else {
+                        // 仅使用日志级别的颜色区分
+                        ImVec4 textColor = GetCustomLogLevelColor(log);
+                        ImGui::TextColored(textColor, "%s", log.c_str());
+                    }
                 } else {
-                    // 简单的日志级别颜色区分
-                    ImVec4 textColor = GetLogLevelColor(log);
-                    ImGui::TextColored(textColor, "%s", log.c_str());
+                    // 不启用彩色显示，使用默认白色
+                    ImGui::TextUnformatted(log.c_str());
                 }
             }
         }
@@ -1087,14 +1136,14 @@ HWND Manager::CreateHiddenWindow() {
     }
 
     return CreateWindowEx(
-            0,
-            wc.lpszClassName,
-            L"CLI Manager Tray Window",
-            0,
-            0, 0, 0, 0,
-            NULL, NULL,
-            wc.hInstance,
-            NULL
+        0,
+        wc.lpszClassName,
+        L"CLI Manager Tray Window",
+        0,
+        0, 0, 0, 0,
+        NULL, NULL,
+        wc.hInstance,
+        NULL
     );
 }
 
@@ -1303,7 +1352,7 @@ bool Manager::InitializeGLFW() {
     int windowWidth = static_cast<int>(screenWidth * 0.8);
     int windowHeight = static_cast<int>(screenHeight * 0.8);
 
-//    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);//窗口隐藏
+    //    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);//窗口隐藏
 
     m_window = glfwCreateWindow(windowWidth, windowHeight, "CLI程序管理工具", nullptr, nullptr);
     if (!m_window)
@@ -1502,3 +1551,241 @@ extern "C" {
     void* GetMacTrayIcon();
 }
 #endif
+
+
+void Manager::RenderColorThemeSettings() {
+    // 预设主题
+    if (ImGui::MenuItem("暗黑(Dark)")) {
+        ImGui::StyleColorsDark();
+    }
+    if (ImGui::MenuItem("明亮(Light)")) {
+        ImGui::StyleColorsLight();
+    }
+    if (ImGui::MenuItem("经典(Classic)")) {
+        ImGui::StyleColorsClassic();
+    }
+    ImGui::Separator();
+    ImGui::Text("颜色主题设置");
+
+    if (ImGui::Checkbox("自定义日志颜色", &m_app_state.use_custom_log_colors)) {
+        m_app_state.settings_dirty = true;
+    }
+
+    if (m_app_state.use_custom_log_colors) {
+        ImGui::Indent();
+
+        ImGui::Text("日志级别颜色:");
+
+        // 编辑错误日志颜色
+        ImVec4 errorColor = ImVec4(
+            m_app_state.log_colors.error_color.x,
+            m_app_state.log_colors.error_color.y,
+            m_app_state.log_colors.error_color.z,
+            1.0f
+        );
+        if (ImGui::ColorEdit3("错误日志", (float *) &errorColor)) {
+            m_app_state.log_colors.error_color = errorColor;
+            m_app_state.settings_dirty = true;
+        }
+
+        // 编辑警告日志颜色
+        ImVec4 warnColor = ImVec4(
+            m_app_state.log_colors.warn_color.x,
+            m_app_state.log_colors.warn_color.y,
+            m_app_state.log_colors.warn_color.z,
+            1.0f
+        );
+        if (ImGui::ColorEdit3("警告日志", (float *) &warnColor)) {
+            m_app_state.log_colors.warn_color = warnColor;
+            m_app_state.settings_dirty = true;
+        }
+
+        // 编辑信息日志颜色
+        ImVec4 infoColor = ImVec4(
+            m_app_state.log_colors.info_color.x,
+            m_app_state.log_colors.info_color.y,
+            m_app_state.log_colors.info_color.z,
+            1.0f
+        );
+        if (ImGui::ColorEdit3("信息日志", (float *) &infoColor)) {
+            m_app_state.log_colors.info_color = infoColor;
+            m_app_state.settings_dirty = true;
+        }
+
+        // 编辑调试日志颜色
+        ImVec4 debugColor = ImVec4(
+            m_app_state.log_colors.debug_color.x,
+            m_app_state.log_colors.debug_color.y,
+            m_app_state.log_colors.debug_color.z,
+            1.0f
+        );
+        if (ImGui::ColorEdit3("调试日志", (float *) &debugColor)) {
+            m_app_state.log_colors.debug_color = debugColor;
+            m_app_state.settings_dirty = true;
+        }
+
+        // 重置为默认颜色按钮
+        if (ImGui::Button("重置为默认颜色")) {
+            m_app_state.log_colors.ResetToDefaults();
+            m_app_state.settings_dirty = true;
+        }
+
+        ImGui::Unindent();
+    }
+
+    // ANSI颜色设置
+    ImGui::Separator();
+
+    if (ImGui::Checkbox("使用ANSI颜色转义", &m_app_state.use_ansi_colors)) {
+        m_app_state.settings_dirty = true;
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+        ImGui::TextUnformatted("启用后，日志中的ANSI颜色转义序列将被解析并显示为彩色文本。");
+        ImGui::TextUnformatted("例如: \\033[31m红色文本\\033[0m");
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
+
+    // 颜色样式设置
+    ImGui::Text("全局颜色样式:");
+
+    static int currentTheme = 0; // 默认暗色主题
+    const char *themes[] = {"暗黑 (Dark)", "明亮 (Light)", "经典 (Classic)", "自定义 (Custom)"};
+
+    if (ImGui::Combo("应用主题", &currentTheme, themes, IM_ARRAYSIZE(themes))) {
+        switch (currentTheme) {
+            case 0: ImGui::StyleColorsDark();
+                break;
+            case 1: ImGui::StyleColorsLight();
+                break;
+            case 2: ImGui::StyleColorsClassic();
+                break;
+            case 3: /* 应用自定义主题 */ break;
+        }
+    }
+
+    // 自定义主题编辑器（仅在选择"自定义"主题时显示）
+    if (currentTheme == 3) {
+        if (ImGui::TreeNode("自定义主题编辑器")) {
+            ImGuiStyle &style = ImGui::GetStyle();
+
+            // 添加主题颜色编辑器
+            for (int i = 0; i < ImGuiCol_COUNT; i++) {
+                const char *name = ImGui::GetStyleColorName(i);
+                ImGui::ColorEdit4(name, (float *) &style.Colors[i]);
+            }
+
+            // 添加样式参数编辑器
+            ImGui::SliderFloat("窗口圆角", &style.WindowRounding, 0.0f, 12.0f, "%.0f");
+            ImGui::SliderFloat("子窗口圆角", &style.ChildRounding, 0.0f, 12.0f, "%.0f");
+            ImGui::SliderFloat("框架圆角", &style.FrameRounding, 0.0f, 12.0f, "%.0f");
+            ImGui::SliderFloat("弹出窗口圆角", &style.PopupRounding, 0.0f, 12.0f, "%.0f");
+            ImGui::SliderFloat("滚动条圆角", &style.ScrollbarRounding, 0.0f, 12.0f, "%.0f");
+            ImGui::SliderFloat("抓取圆角", &style.GrabRounding, 0.0f, 12.0f, "%.0f");
+            ImGui::SliderFloat("标签圆角", &style.TabRounding, 0.0f, 12.0f, "%.0f");
+
+            ImGui::Separator();
+
+            // 保存/加载主题按钮
+            if (ImGui::Button("保存当前主题")) {
+                SaveCurrentTheme();
+            }
+
+            ImGui::SameLine();
+
+            if (ImGui::Button("加载保存的主题")) {
+                LoadSavedTheme();
+            }
+
+            ImGui::TreePop();
+        }
+    }
+}
+
+// 保存当前主题设置
+void Manager::SaveCurrentTheme() {
+    std::ofstream file("theme.ini", std::ios::binary);
+    if (file.is_open()) {
+        ImGuiStyle &style = ImGui::GetStyle();
+
+        // 保存主题颜色
+        for (int i = 0; i < ImGuiCol_COUNT; i++) {
+            file.write(reinterpret_cast<const char *>(&style.Colors[i]), sizeof(ImVec4));
+        }
+
+        // 保存样式参数
+        file.write(reinterpret_cast<const char *>(&style.WindowRounding), sizeof(float));
+        file.write(reinterpret_cast<const char *>(&style.ChildRounding), sizeof(float));
+        file.write(reinterpret_cast<const char *>(&style.FrameRounding), sizeof(float));
+        file.write(reinterpret_cast<const char *>(&style.PopupRounding), sizeof(float));
+        file.write(reinterpret_cast<const char *>(&style.ScrollbarRounding), sizeof(float));
+        file.write(reinterpret_cast<const char *>(&style.GrabRounding), sizeof(float));
+        file.write(reinterpret_cast<const char *>(&style.TabRounding), sizeof(float));
+
+        file.close();
+
+        // 显示保存成功提示
+        m_show_theme_save_success = true;
+        m_theme_save_success_timer = 3.0f; // 3秒后消失
+    }
+}
+
+// 加载保存的主题设置
+void Manager::LoadSavedTheme() {
+    std::ifstream file("theme.ini", std::ios::binary);
+    if (file.is_open()) {
+        ImGuiStyle &style = ImGui::GetStyle();
+
+        // 加载主题颜色
+        for (int i = 0; i < ImGuiCol_COUNT; i++) {
+            file.read(reinterpret_cast<char *>(&style.Colors[i]), sizeof(ImVec4));
+        }
+
+        // 加载样式参数
+        file.read(reinterpret_cast<char *>(&style.WindowRounding), sizeof(float));
+        file.read(reinterpret_cast<char *>(&style.ChildRounding), sizeof(float));
+        file.read(reinterpret_cast<char *>(&style.FrameRounding), sizeof(float));
+        file.read(reinterpret_cast<char *>(&style.PopupRounding), sizeof(float));
+        file.read(reinterpret_cast<char *>(&style.ScrollbarRounding), sizeof(float));
+        file.read(reinterpret_cast<char *>(&style.GrabRounding), sizeof(float));
+        file.read(reinterpret_cast<char *>(&style.TabRounding), sizeof(float));
+
+        file.close();
+
+        // 显示加载成功提示
+        m_show_theme_load_success = true;
+        m_theme_load_success_timer = 3.0f; // 3秒后消失
+    }
+}
+
+ImVec4 Manager::GetCustomLogLevelColor(const std::string &log) {
+    if (!m_app_state.use_custom_log_colors) {
+        // 使用默认颜色
+        return GetLogLevelColor(log);
+    }
+
+    // 使用自定义颜色
+    if (log.find("错误") != std::string::npos || log.find("[E]") != std::string::npos ||
+        log.find("[ERROR]") != std::string::npos || log.find("error") != std::string::npos) {
+        return m_app_state.log_colors.error_color;
+    } else if (log.find("警告") != std::string::npos || log.find("[W]") != std::string::npos ||
+               log.find("[WARN]") != std::string::npos || log.find("warning") != std::string::npos) {
+        return m_app_state.log_colors.warn_color;
+    } else if (log.find("信息") != std::string::npos || log.find("[I]") != std::string::npos ||
+               log.find("[INFO]") != std::string::npos || log.find("info") != std::string::npos) {
+        return m_app_state.log_colors.info_color;
+    } else if (log.find("调试") != std::string::npos || log.find("[D]") != std::string::npos ||
+               log.find("[DEBUG]") != std::string::npos || log.find("debug") != std::string::npos) {
+        return m_app_state.log_colors.debug_color;
+    } else if (log.find("跟踪") != std::string::npos || log.find("[T]") != std::string::npos ||
+               log.find("[TRACE]") != std::string::npos || log.find("trace") != std::string::npos) {
+        return m_app_state.log_colors.trace_color;
+    }
+
+    return ImVec4(1.0f, 1.0f, 1.0f, 1.0f); // 默认白色
+}
