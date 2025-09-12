@@ -35,7 +35,13 @@ public:
     // 设置回调函数
     void SetShowWindowCallback(const ShowWindowCallback &callback);
     void SetExitCallback(const ExitCallback &callback);
-
+#ifdef _WIN32
+    void ShowWindowsNotification(const std::wstring& title, const std::wstring& message);
+#elif __APPLE__
+    void ShowMacNotification(const std::string& title, const std::string& message);
+#else
+    void ShowLinuxNotification(const std::string& title, const std::string& message);
+#endif
 private:
     void CreateMenu();
     void DestroyMenu();

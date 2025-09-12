@@ -16,7 +16,7 @@ public:
     void SaveSettings();
     void ApplySettings();
 
-    // 新增：启动命令历史记录管理
+    // 启动命令历史记录管理
     void AddCommandToHistory(const std::string& command);
     void RemoveCommandFromHistory(int index);
     void ClearCommandHistory();
@@ -27,6 +27,8 @@ public:
     CLIProcess cli_process;
     char command_input[256]{};
     char send_command[256]{};
+    char working_directory[256]{};
+    bool auto_working_dir;
     bool auto_scroll_logs;
     bool enable_colored_logs;
     int max_log_lines;

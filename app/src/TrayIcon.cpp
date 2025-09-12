@@ -4,7 +4,6 @@
 #ifdef _WIN32
 TrayIcon::TrayIcon(HWND hwnd, HICON icon)
     : m_hwnd(hwnd), m_icon(icon), m_visible(false), m_menu(nullptr) {
-
     ZeroMemory(&m_nid, sizeof(m_nid));
     m_nid.cbSize = sizeof(m_nid);
     m_nid.hWnd = m_hwnd;
@@ -53,14 +52,15 @@ void TrayIcon::Hide() {
 }
 
 #ifdef _WIN32
-void TrayIcon::UpdateWebUrl(const std::wstring& url) {
+void TrayIcon::UpdateWebUrl(const std::wstring &url) {
     m_web_url = url;
     // 重新创建菜单以更新Web URL显示
     DestroyMenu();
     CreateMenu();
 }
 #else
-void TrayIcon::UpdateWebUrl(const std::string& url) {
+void TrayIcon::UpdateWebUrl(const std::string &url)
+{
     m_web_url = url;
     // 重新创建菜单以更新Web URL显示
     DestroyMenu();
@@ -75,6 +75,32 @@ void TrayIcon::SetShowWindowCallback(const ShowWindowCallback &callback) {
 void TrayIcon::SetExitCallback(const ExitCallback &callback) {
     m_exit_callback = callback;
 }
+
+#ifdef _WIN32
+void TrayIcon::ShowWindowsNotification(const std::wstring &title, const std::wstring &message) {
+    NOTIFYICONDATA nid = m_nid;
+    nid.uFlags |= NIF_INFO;
+    wcsncpy_s(nid.szInfoTitle, title.c_str(), _TRUNCATE);
+    wcsncpy_s(nid.szInfo, message.c_str(), _TRUNCATE);
+    nid.dwInfoFlags = NIIF_INFO; // 信息图标，可选 NIIF_WARNING, NIIF_ERROR
+    Shell_NotifyIcon(NIM_MODIFY, &nid);
+}
+#elif __APPLE__
+void TrayIcon::ShowMacNotification(const std::string &title, const std::string &message)
+{
+    // 通过 AppleScript 或 Objective-C 桥接
+    std::string script = "display notification \"" + message + "\" with title \"" + title + "\"";
+    std::string cmd = "osascript -e '" + script + "'";
+    system(cmd.c_str());
+}
+#else
+void TrayIcon::ShowLinuxNotification(const std::string &title, const std::string &message)
+{
+    // 使用 notify-send 命令
+    std::string cmd = "notify-send \"" + title + "\" \"" + message + "\"";
+    system(cmd.c_str());
+}
+#endif
 
 void TrayIcon::CreateMenu() {
 #ifdef _WIN32
@@ -165,8 +191,8 @@ LRESULT CALLBACK TrayIcon::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         }
         break;
 
-    default:
-        return DefWindowProc(hwnd, msg, wParam, lParam);
+        default:
+            return DefWindowProc(hwnd, msg, wParam, lParam);
     }
     return 0;
 }
@@ -174,47 +200,56 @@ LRESULT CALLBACK TrayIcon::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 void TrayIcon::UpdateStatus(const std::wstring &status, const std::wstring &pid) {
     m_status = status;
     m_pid = pid;
-// 重新创建菜单以更新Status显示
+    // 重新创建菜单以更新Status显示
     DestroyMenu();
     CreateMenu();
 }
 
 #else
 // macOS 特定实现
-void TrayIcon::ShowMacTrayIcon() {
+void TrayIcon::ShowMacTrayIcon()
+{
     // 通过 Objective-C 接口显示托盘图标
     ShowMacTrayIconImpl(m_app_delegate, m_icon);
 }
 
-void TrayIcon::HideMacTrayIcon() {
+void TrayIcon::HideMacTrayIcon()
+{
     // 通过 Objective-C 接口隐藏托盘图标
     HideMacTrayIconImpl(m_app_delegate);
 }
 
-void TrayIcon::CreateMacMenu() {
+void TrayIcon::CreateMacMenu()
+{
     // 通过 Objective-C 接口创建菜单
     CreateMacMenuImpl(m_app_delegate, m_web_url.c_str());
 }
 
-void TrayIcon::DestroyMacMenu() {
+void TrayIcon::DestroyMacMenu()
+{
     // 通过 Objective-C 接口销毁菜单
     DestroyMacMenuImpl(m_app_delegate);
 }
 
-void TrayIcon::OnMacMenuAction(int action) {
-    switch (action) {
+void TrayIcon::OnMacMenuAction(int action)
+{
+    switch (action)
+    {
     case 1001: // 显示主窗口
-        if (m_show_window_callback) {
+        if (m_show_window_callback)
+        {
             m_show_window_callback();
         }
         break;
     case 1002: // 打开Web页面
-        if (!m_web_url.empty()) {
+        if (!m_web_url.empty())
+        {
             OpenWebPageMac(m_web_url.c_str());
         }
         break;
     case 1003: // 退出
-        if (m_exit_callback) {
+        if (m_exit_callback)
+        {
             m_exit_callback();
         }
         break;
@@ -222,18 +257,21 @@ void TrayIcon::OnMacMenuAction(int action) {
 }
 
 // C 接口函数，供 Objective-C 调用
-extern "C" void TrayIconMenuCallback(void* tray_instance, int action) {
-    if (tray_instance) {
-        static_cast<TrayIcon*>(tray_instance)->OnMacMenuAction(action);
+extern "C" void TrayIconMenuCallback(void *tray_instance, int action)
+{
+    if (tray_instance)
+    {
+        static_cast<TrayIcon *>(tray_instance)->OnMacMenuAction(action);
     }
 }
 
 // 外部声明的 Objective-C 接口函数
-extern "C" {
-    void ShowMacTrayIconImpl(void* app_delegate, void* icon);
-    void HideMacTrayIconImpl(void* app_delegate);
-    void CreateMacMenuImpl(void* app_delegate, const char* web_url);
-    void DestroyMacMenuImpl(void* app_delegate);
-    void OpenWebPageMac(const char* url);
+extern "C"
+{
+    void ShowMacTrayIconImpl(void *app_delegate, void *icon);
+    void HideMacTrayIconImpl(void *app_delegate);
+    void CreateMacMenuImpl(void *app_delegate, const char *web_url);
+    void DestroyMacMenuImpl(void *app_delegate);
+    void OpenWebPageMac(const char *url);
 }
 #endif

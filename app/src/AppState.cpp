@@ -7,6 +7,7 @@ AppState::AppState() :
     show_main_window(true),
     auto_start(false),
     auto_scroll_logs(true),
+    auto_working_dir(true),
     enable_colored_logs(true),
     max_log_lines(1000),
     stop_timeout_ms(5000),
@@ -77,7 +78,7 @@ std::string AppState::SerializeCommandHistory() const {
     return oss.str();
 }
 
-// 新增：反序列化命令历史记录
+// 反序列化命令历史记录
 void AppState::DeserializeCommandHistory(const std::string& serialized) {
     command_history.clear();
     if (serialized.empty()) return;
@@ -185,6 +186,9 @@ void AppState::LoadSettings() {
                 if (key == "CommandInput") {
                     strncpy_s(command_input, value.c_str(), sizeof(command_input) - 1);
                 }
+                else if (key == "WorkingDirectory") {
+                    strncpy_s(working_directory, value.c_str(), sizeof(working_directory) - 1);
+                }
                 else if (key == "MaxLogLines") {
                     max_log_lines = std::stoi(value);
                     max_log_lines = std::max(100, std::min(max_log_lines, 10000));
@@ -197,6 +201,9 @@ void AppState::LoadSettings() {
                 }
                 else if (key == "AutoStart") {
                     auto_start = (value == "1");
+                }
+                else if (key == "AutoWorkDirectory") {
+                    auto_working_dir = (value == "1");
                 }
                 else if (key == "WebUrl") {
                     strncpy_s(web_url, value.c_str(), sizeof(web_url) - 1);
@@ -240,10 +247,12 @@ void AppState::SaveSettings() {
 
     file << "[Settings]\n";
     file << "CommandInput=" << command_input << "\n";
+    file << "WorkingDirectory=" << working_directory << "\n";
     file << "MaxLogLines=" << max_log_lines << "\n";
     file << "AutoScrollLogs=" << (auto_scroll_logs ? "1" : "0") << "\n";
     file << "EnableColoredLogs=" << (enable_colored_logs ? "1" : "0") << "\n";
     file << "AutoStart=" << (auto_start ? "1" : "0") << "\n";
+    file << "AutoWorkDirectory=" << (auto_working_dir ? "1" : "0") << "\n";
     file << "WebUrl=" << web_url << "\n";
 
     // 停止命令相关配置的保存
@@ -284,6 +293,11 @@ void AppState::ApplySettings() {
         cli_process.SetEnvironmentVariables({});
     }
 
-    // 新增：应用输出编码设置
+    if (strlen(working_directory)>0) {
+        cli_process.SetWorkingDirectory(working_directory);
+    }
+
+    cli_process.SetAutoWorkingDir(auto_working_dir);
+    // 应用输出编码设置
     cli_process.SetOutputEncoding(output_encoding);
 }
